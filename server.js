@@ -43,13 +43,33 @@ const upload = multer({
     }
 });
 
-// Add Transformers.js import
-let pipeline;
+// Conditional import of Transformers.js - only for local development
+let pipeline = null;
 let embedder = null;
-(async () => {
-    const { pipeline: importedPipeline } = await import('@xenova/transformers');
-    pipeline = importedPipeline;
-})();
+let transformersAvailable = false;
+
+// Only attempt to load transformers if NOT in Azure App Service
+async function conditionallyLoadTransformers() {
+    // Skip transformers entirely in Azure App Service
+    if (process.env.WEBSITE_SITE_NAME) {
+        console.log('🌐 Azure App Service detected - skipping Transformers.js import');
+        return false;
+    }
+    
+    // For local development, always load transformers for embeddings (needed for RAG)
+    // Even when using Azure OpenAI, we still need local embeddings for document processing
+    try {
+        console.log('📦 Attempting to load Transformers.js...');
+        const transformers = await import('@xenova/transformers');
+        pipeline = transformers.pipeline;
+        transformersAvailable = true;
+        console.log('✅ Transformers.js loaded successfully');
+        return true;
+    } catch (error) {
+        console.log('⚠️ Transformers.js not available:', error.message);
+        return false;
+    }
+}
 
 // Add model loading state
 let localModel = null;
@@ -127,7 +147,22 @@ function getLocalModelInfo(modelName) {
 
 // Initialize embedder for RAG
 async function initializeEmbedder() {
+    // Skip embedder in Azure App Service - use Azure OpenAI for everything
+    if (process.env.WEBSITE_SITE_NAME) {
+        console.log('📍 Azure App Service detected - embedder not needed (using Azure OpenAI only)');
+        return null;
+    }
+    
     if (embedder) return embedder;
+    
+    // Ensure transformers is loaded first
+    if (!transformersAvailable) {
+        const loaded = await conditionallyLoadTransformers();
+        if (!loaded) {
+            console.log('⚠️ Transformers not available - embedder cannot be initialized');
+            return null;
+        }
+    }
     
     try {
         console.log('Initializing text embedder for RAG...');
@@ -142,6 +177,13 @@ async function initializeEmbedder() {
 
 // Initialize local model
 async function initializeLocalModel(modelName = 'Xenova/LaMini-Flan-T5-248M') {
+    // Skip local models entirely in Azure App Service
+    if (process.env.WEBSITE_SITE_NAME) {
+        console.log('📍 Azure App Service detected - local models not supported');
+        modelError = 'Local models not available in Azure App Service';
+        return false;
+    }
+    
     if (localModel && !modelLoading) {
         console.log('Local model already initialized');
         return true;
@@ -150,6 +192,15 @@ async function initializeLocalModel(modelName = 'Xenova/LaMini-Flan-T5-248M') {
     if (modelLoading) {
         console.log('Model already loading...');
         return false;
+    }
+    
+    // Ensure transformers is loaded first
+    if (!transformersAvailable) {
+        const loaded = await conditionallyLoadTransformers();
+        if (!loaded) {
+            modelError = 'Transformers.js not available';
+            return false;
+        }
     }
     
     modelLoading = true;
@@ -511,36 +562,15 @@ async function processWebsitePages(pages) {
 
 // Main crawl and index function
 async function crawlAndIndexWebsite(baseUrl = null, options = {}) {
-    // Detect the actual base URL for Azure App Service
     let targetUrl = baseUrl;
     
     if (!targetUrl) {
-        // Try to detect Azure App Service URL
-        if (process.env.WEBSITE_SITE_NAME) {
-            // Try multiple methods to get the full Azure URL
-            if (process.env.WEBSITE_HOSTNAME) {
-                // Use WEBSITE_HOSTNAME if available (most reliable)
-                targetUrl = `https://${process.env.WEBSITE_HOSTNAME}`;
-            } else if (process.env.HTTP_HOST) {
-                // Use HTTP_HOST from request headers
-                targetUrl = `https://${process.env.HTTP_HOST}`;
-            } else {
-                // Fallback: construct from WEBSITE_SITE_NAME
-                // This might not include the region suffix, but it's better than nothing
-                targetUrl = `https://${process.env.WEBSITE_SITE_NAME}.azurewebsites.net`;
-            }
-        } else {
-            // Local development
-            targetUrl = `http://localhost:${process.env.PORT || 3000}`;
-        }
+        targetUrl = detectBaseUrl();
     }
     
     console.log(`\n=== CRAWL AND INDEX WEBSITE ===`);
     console.log('Detected URL:', targetUrl);
     console.log('Environment:', process.env.WEBSITE_SITE_NAME ? 'Azure App Service' : 'Local');
-    console.log('WEBSITE_HOSTNAME:', process.env.WEBSITE_HOSTNAME || 'not set');
-    console.log('HTTP_HOST:', process.env.HTTP_HOST || 'not set');
-    console.log('WEBSITE_SITE_NAME:', process.env.WEBSITE_SITE_NAME || 'not set');
     
     try {
         // Validate URL format
@@ -557,31 +587,93 @@ async function crawlAndIndexWebsite(baseUrl = null, options = {}) {
             return [];
         }
         
-        // Process pages into chunks and embeddings
-        const websiteChunks = await processWebsitePages(pages);
-        
-        // Remove old website content
-        documentEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
-        documentStore = documentStore.filter(d => d.type !== 'website');
-        
-        // Add new website content
-        documentEmbeddings.push(...websiteChunks);
-        
-        // Add website info to document store
-        const websiteDoc = {
-            filename: `Website: ${targetUrl}`,
-            type: 'website',
-            uploadedAt: new Date().toISOString(),
-            chunks: websiteChunks.length,
-            pages: pages.length,
-            totalLength: pages.reduce((sum, page) => sum + page.content.length, 0),
-            baseUrl: targetUrl
-        };
-        
-        documentStore.push(websiteDoc);
-        
-        console.log(`✅ Website indexing complete: ${pages.length} pages, ${websiteChunks.length} chunks`);
-        return pages;
+        // For Azure App Service OR when embedder is not available, store pages without embeddings
+        if (process.env.WEBSITE_SITE_NAME || !embedder) {
+            console.log('🌐 Storing pages without embeddings (Azure App Service mode or embedder unavailable)');
+            
+            // Remove old website content
+            documentEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+            documentStore = documentStore.filter(d => d.type !== 'website');
+            
+            // Create simple chunks without embeddings
+            const websiteChunks = [];
+            
+            for (const page of pages) {
+                console.log(`Processing: ${page.title}`);
+                
+                // Create structured content for better chunking
+                let structuredContent = `${page.title}\n\n`;
+                if (page.description) {
+                    structuredContent += `${page.description}\n\n`;
+                }
+                structuredContent += page.content;
+                
+                // Chunk the content
+                const chunks = chunkText(structuredContent, 500, 50);
+                
+                // Store chunks without embeddings for simple text search
+                for (let i = 0; i < chunks.length; i++) {
+                    const chunk = chunks[i];
+                    websiteChunks.push({
+                        chunk,
+                        embedding: null, // No embedding when embedder unavailable
+                        source: `${page.title} (${page.url})`,
+                        url: page.url,
+                        title: page.title,
+                        chunkIndex: i,
+                        pageIndex: pages.indexOf(page),
+                        type: 'website'
+                    });
+                }
+            }
+            
+            // Add chunks to storage
+            documentEmbeddings.push(...websiteChunks);
+            
+            // Add website info to document store
+            const websiteDoc = {
+                filename: `Website: ${targetUrl}`,
+                type: 'website',
+                uploadedAt: new Date().toISOString(),
+                chunks: websiteChunks.length,
+                pages: pages.length,
+                totalLength: pages.reduce((sum, page) => sum + page.content.length, 0),
+                baseUrl: targetUrl,
+                note: embedder ? 'With embeddings' : 'No embeddings - text search only'
+            };
+            
+            documentStore.push(websiteDoc);
+            
+            console.log(`✅ Website indexing complete (${embedder ? 'with' : 'without'} embeddings): ${pages.length} pages, ${websiteChunks.length} chunks`);
+            return pages;
+            
+        } else {
+            // Local development with embeddings available
+            const websiteChunks = await processWebsitePages(pages);
+            
+            // Remove old website content
+            documentEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+            documentStore = documentStore.filter(d => d.type !== 'website');
+            
+            // Add new website content
+            documentEmbeddings.push(...websiteChunks);
+            
+            // Add website info to document store
+            const websiteDoc = {
+                filename: `Website: ${targetUrl}`,
+                type: 'website',
+                uploadedAt: new Date().toISOString(),
+                chunks: websiteChunks.length,
+                pages: pages.length,
+                totalLength: pages.reduce((sum, page) => sum + page.content.length, 0),
+                baseUrl: targetUrl
+            };
+            
+            documentStore.push(websiteDoc);
+            
+            console.log(`✅ Website indexing complete: ${pages.length} pages, ${websiteChunks.length} chunks`);
+            return pages;
+        }
         
     } catch (error) {
         console.error('Error during website crawl and index:', error);
@@ -804,50 +896,82 @@ async function generateAzureOpenAIResponseWithRAG(message, useRAG = true, includ
     let context = '';
     let sources = [];
     
-    // Retrieve relevant documents if RAG is enabled
+    // In Azure App Service, skip RAG entirely if no embedder is available
     if (useRAG && documentEmbeddings.length > 0) {
-        console.log('Retrieving relevant documents for Azure OpenAI RAG...');
+        console.log('RAG requested but in Azure App Service mode - using document text directly');
         
-        // Filter embeddings based on preferences
-        let availableEmbeddings = documentEmbeddings;
-        if (!includeWebsiteContent) {
-            availableEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
-        }
-        
-        if (availableEmbeddings.length > 0) {
-            // Initialize embedder for RAG if needed
-            if (!embedder) {
-                await initializeEmbedder();
+        // For Azure App Service, use simple text matching instead of embeddings
+        // This is a fallback when embedder is not available
+        if (process.env.WEBSITE_SITE_NAME) {
+            console.log('Using simple text search fallback for RAG in Azure App Service');
+            
+            // Filter embeddings based on preferences
+            let availableEmbeddings = documentEmbeddings;
+            if (!includeWebsiteContent) {
+                availableEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
             }
             
-            if (embedder) {
-                const queryEmbedding = await generateEmbedding(message);
+            if (availableEmbeddings.length > 0) {
+                // Simple keyword matching as fallback
+                const messageLower = message.toLowerCase();
+                const matchingChunks = availableEmbeddings
+                    .filter(doc => doc.chunk.toLowerCase().includes(messageLower))
+                    .slice(0, 3);
                 
-                const similarities = availableEmbeddings.map((docEmb, index) => ({
-                    index,
-                    similarity: cosineSimilarity(queryEmbedding, docEmb.embedding),
-                    chunk: docEmb.chunk,
-                    source: docEmb.source,
-                    url: docEmb.url || null,
-                    type: docEmb.type || 'document'
-                }));
-                
-                const relevantChunks = similarities
-                    .sort((a, b) => b.similarity - a.similarity)
-                    .slice(0, parseInt(process.env.RAG_TOP_K) || 3);
-                
-                if (relevantChunks.length > 0) {
-                    context = relevantChunks.map(chunk => chunk.chunk).join('\n\n');
-                    sources = [...new Set(relevantChunks.map(chunk => chunk.source))];
+                if (matchingChunks.length === 0) {
+                    // If no keyword matches, take the first few chunks
+                    const fallbackChunks = availableEmbeddings.slice(0, 3);
+                    context = fallbackChunks.map(chunk => chunk.chunk).join('\n\n');
+                    sources = [...new Set(fallbackChunks.map(chunk => chunk.source))];
+                    console.log('Using fallback chunks for context');
+                } else {
+                    context = matchingChunks.map(chunk => chunk.chunk).join('\n\n');
+                    sources = [...new Set(matchingChunks.map(chunk => chunk.source))];
+                    console.log(`Found ${matchingChunks.length} matching chunks`);
+                }
+            }
+        } else {
+            // Local development with embedder
+            console.log('Retrieving relevant documents for Azure OpenAI RAG...');
+            
+            // Filter embeddings based on preferences
+            let availableEmbeddings = documentEmbeddings;
+            if (!includeWebsiteContent) {
+                availableEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+            }
+            
+            if (availableEmbeddings.length > 0 && embedder) {
+                try {
+                    const queryEmbedding = await generateEmbedding(message);
                     
-                    console.log(`Found ${relevantChunks.length} relevant chunks from: ${sources.join(', ')}`);
-                    console.log('Content types:', [...new Set(relevantChunks.map(c => c.type))]);
+                    const similarities = availableEmbeddings.map((docEmb, index) => ({
+                        index,
+                        similarity: cosineSimilarity(queryEmbedding, docEmb.embedding),
+                        chunk: docEmb.chunk,
+                        source: docEmb.source,
+                        url: docEmb.url || null,
+                        type: docEmb.type || 'document'
+                    }));
+                    
+                    const relevantChunks = similarities
+                        .sort((a, b) => b.similarity - a.similarity)
+                        .slice(0, parseInt(process.env.RAG_TOP_K) || 3);
+                    
+                    if (relevantChunks.length > 0) {
+                        context = relevantChunks.map(chunk => chunk.chunk).join('\n\n');
+                        sources = [...new Set(relevantChunks.map(chunk => chunk.source))];
+                        
+                        console.log(`Found ${relevantChunks.length} relevant chunks from: ${sources.join(', ')}`);
+                    }
+                } catch (error) {
+                    console.error('❌ RAG error:', error);
+                    console.log('📝 Continuing without RAG context...');
                 }
             }
         }
     }
     
-    // Generate response with Azure OpenAI
+    // Generate response with Azure OpenAI (with or without context)
     return await generateAzureOpenAIResponse(message, context, sources);
 }
 
@@ -1721,7 +1845,7 @@ app.listen(port, () => {
 
 // Initialize Azure OpenAI client on startup if configured and not using local model
 async function initializeServicesOnStartup() {
-    console.log('\n🚀 INITIALIZING SERVICES FOR AZURE APP SERVICE 🚀');
+    console.log('\n🚀 INITIALIZING SERVICES 🚀');
     console.log('Environment:', process.env.NODE_ENV || 'not set');
     console.log('Azure App Service:', process.env.WEBSITE_SITE_NAME ? 'YES (' + process.env.WEBSITE_SITE_NAME + ')' : 'NO');
     console.log('Use Local Model:', process.env.USE_LOCAL_MODEL);
@@ -1731,11 +1855,16 @@ async function initializeServicesOnStartup() {
     console.log('Detected Base URL:', detectedUrl);
     
     const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
+    const isAzureAppService = !!process.env.WEBSITE_SITE_NAME;
     
-    if (!useLocalModel) {
-        console.log('🌐 Initializing Azure OpenAI for cloud deployment...');
+    if (isAzureAppService) {
+        console.log('🌐 Azure App Service mode - optimizing for cloud deployment');
+        
+        // Force Azure OpenAI mode in App Service
+        process.env.USE_LOCAL_MODEL = 'false';
+        
+        // Initialize Azure OpenAI only
         try {
-            // Check environment variables first
             const requiredVars = ['AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_KEY', 'AZURE_OPENAI_DEPLOYMENT'];
             const missing = requiredVars.filter(varName => !process.env[varName]);
             
@@ -1746,25 +1875,56 @@ async function initializeServicesOnStartup() {
             }
             
             azureOpenAIClient = initializeAzureOpenAI();
-            if (!azureOpenAIClient) {
+            if (azureOpenAIClient) {
+                console.log('✅ Azure OpenAI client ready for production');
+            } else {
                 console.error('❌ Azure OpenAI client initialization failed');
-                return;
             }
-            
-            console.log('✅ Azure OpenAI client initialized successfully');
-            
         } catch (error) {
-            console.error('❌ Error initializing Azure OpenAI:', error);
+            console.error('❌ Azure OpenAI startup error:', error);
         }
+        
+        // Skip embedder and transformers entirely in Azure App Service
+        console.log('⏭️ Skipping embedder initialization in Azure App Service');
+        console.log('💡 Using Azure OpenAI for all functionality');
+        
     } else {
-        console.log('🤖 Local model initialization requested');
-        const modelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
-        await initializeLocalModel(modelName);
+        // Local development - always try to initialize embedder for RAG
+        console.log('🖥️ Local development environment');
+        
+        // Load transformers for embeddings (needed for RAG even with Azure OpenAI)
+        await conditionallyLoadTransformers();
+        
+        if (!useLocalModel) {
+            console.log('🌐 Local development with Azure OpenAI...');
+            try {
+                azureOpenAIClient = initializeAzureOpenAI();
+                if (azureOpenAIClient) {
+                    console.log('✅ Azure OpenAI client ready');
+                }
+            } catch (error) {
+                console.error('❌ Azure OpenAI initialization error:', error);
+            }
+        } else {
+            console.log('🤖 Local model mode enabled');
+            const modelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+            await initializeLocalModel(modelName);
+        }
+        
+        // Try to initialize embedder for RAG (local development)
+        try {
+            console.log('🔧 Initializing embedder for RAG...');
+            await initializeEmbedder();
+            if (embedder) {
+                console.log('✅ Embedder ready for RAG functionality');
+            } else {
+                console.log('⚠️ Embedder not available - will use text search fallback');
+            }
+        } catch (error) {
+            console.error('⚠️ Embedder initialization failed:', error.message);
+            console.log('📝 Website crawling will work without embeddings');
+        }
     }
-    
-    // Initialize embedder for RAG functionality
-    console.log('🔧 Initializing embedder for RAG...');
-    await initializeEmbedder();
     
     // Auto-crawl website if enabled
     if (process.env.WEBSITE_AUTO_CRAWL === 'true') {
