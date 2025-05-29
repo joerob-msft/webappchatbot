@@ -5,39 +5,43 @@ A powerful web-based chatbot that supports both Azure OpenAI Service and local A
 ## 🚀 Features
 
 ### Core AI Capabilities
-- **Dual Mode Support**: Run local models or use Azure OpenAI Service
-- **Local Model Inference**: Server-side AI models using Transformers.js
+- **Hybrid Model Support**: Run local models (Transformers.js) or use Azure OpenAI Service
+- **Local Model Inference**: Server-side AI models with automatic fallback system
 - **Multi-Model Support**: Works with GPT-3.5, GPT-4, o1-series, and various local models
 - **Model-Aware Configuration**: Automatically adjusts parameters based on the selected model
+- **Intelligent Fallback**: Automatic model switching when preferred models fail
 
 ### RAG (Retrieval-Augmented Generation)
-- **Document Upload**: Support for .txt, .pdf, .docx, and .md files
-- **Website Crawling**: Automatically crawl and index website content
-- **Intelligent Chunking**: Smart text segmentation with overlap for better context
-- **Semantic Search**: Vector embeddings for relevant document retrieval
-- **Source Attribution**: Responses include source references
+- **Document Upload**: Support for .txt, .pdf, .docx, and .md files (10MB limit)
+- **Website Crawling**: Automatically crawl and index website content with robots.txt compliance
+- **Intelligent Chunking**: Smart text segmentation with configurable overlap for better context
+- **Semantic Search**: Vector embeddings using `all-MiniLM-L6-v2` for relevant document retrieval
+- **Source Attribution**: Responses include source references with URLs
+- **Auto-Crawling**: Automatically crawls your website for knowledge base building
 
 ### Advanced Features
-- **Auto Website Indexing**: Automatically crawls your website for content
-- **Document Processing**: Extract text from various file formats
+- **Admin Panel**: Comprehensive web-based administration interface
+- **Real-time Status**: Live monitoring of crawl progress, model status, and system health
 - **Content Management**: Manage uploaded documents and crawled content
 - **Debug Mode**: Built-in debugging interface for troubleshooting
 - **Health Monitoring**: Comprehensive health check and monitoring endpoints
 - **Memory Tracking**: Monitor resource usage for local models
+- **Model Testing**: Built-in model availability testing
 
 ### Deployment Ready
 - **Azure Deployment**: Configured for Azure Web Apps with GitHub Actions CI/CD
 - **Environment Management**: Flexible configuration for different environments
 - **Scalable Architecture**: Designed to handle multiple users and documents
+- **IIS Support**: Web.config included for Windows/IIS deployment
 
 ## 📋 Prerequisites
 
 ### Local Development
 - **Node.js**: Version 18.0.0 or higher (required for Transformers.js)
-- **npm**: Comes with Node.js
+- **npm**: Package manager (comes with Node.js)
 - **Git**: For version control
 - **Memory**: At least 2GB RAM for local models (4GB+ recommended for RAG)
-- **Storage**: Additional space for uploaded documents and model cache
+- **Storage**: Additional space for uploaded documents and model cache (~1-2GB)
 
 ### Azure Resources (Optional for Cloud Mode)
 - **Azure Subscription**: Active Azure subscription
@@ -55,7 +59,7 @@ Create a `.env` file in the project root with these settings:
 # LOCAL MODEL CONFIGURATION
 # =====================================
 USE_LOCAL_MODEL=true
-LOCAL_MODEL_NAME=distilgpt2
+LOCAL_MODEL_NAME=Xenova/LaMini-Flan-T5-248M
 
 # =====================================
 # RAG CONFIGURATION
@@ -91,7 +95,7 @@ NODE_ENV=development
 | Setting | Description | Default | Options |
 |---------|-------------|---------|---------|
 | `USE_LOCAL_MODEL` | Enable local model mode | `true` | `true`, `false` |
-| `LOCAL_MODEL_NAME` | Local model to use | `distilgpt2` | See model list below |
+| `LOCAL_MODEL_NAME` | Local model to use | `Xenova/LaMini-Flan-T5-248M` | See model list below |
 | `RAG_CHUNK_SIZE` | Text chunk size for RAG | `500` | 200-1000 words |
 | `RAG_CHUNK_OVERLAP` | Overlap between chunks | `50` | 0-100 words |
 | `RAG_TOP_K` | Number of relevant chunks to retrieve | `3` | 1-10 |
@@ -105,30 +109,32 @@ NODE_ENV=development
 
 | Use Case | Primary Model | Alternative | Memory | Best For |
 |----------|---------------|-------------|---------|----------|
-| **Getting Started** | `distilgpt2` | `gpt2` | ~250MB | Fast setup, testing |
-| **General Chat** | `distilgpt2` | `gpt2` | ~250MB | Balanced speed/quality |
-| **Better Quality** | `gpt2` | `flan-t5-small` | ~700MB | Higher quality responses |
-| **Instructions** | `flan-t5-small` | `gpt2` | ~450MB | Following commands |
-| **RAG + Documents** | `distilgpt2` | `gpt2` | ~250MB+ | With document context |
-| **Production** | `gpt2` | `flan-t5-small` | ~700MB | Best local quality |
+| **Getting Started** | `Xenova/distilgpt2` | `Xenova/gpt2` | ~250MB | Fast setup, testing |
+| **General Chat** | `Xenova/LaMini-Flan-T5-248M` | `Xenova/distilgpt2` | ~300MB | Balanced speed/quality |
+| **Better Quality** | `Xenova/gpt2` | `Xenova/flan-t5-small` | ~700MB | Higher quality responses |
+| **Instructions** | `Xenova/flan-t5-small` | `Xenova/LaMini-Flan-T5-248M` | ~450MB | Following commands |
+| **RAG + Documents** | `Xenova/LaMini-Flan-T5-248M` | `Xenova/distilgpt2` | ~300MB+ | With document context |
+| **Production** | `Xenova/gpt2` | `Xenova/flan-t5-small` | ~700MB | Best local quality |
 
 ### Available Models with Details
 
 | Model Name | Provider | Task | Download Size | Memory Usage | Quality |
 |------------|----------|------|---------------|--------------|---------|
-| `distilgpt2` | Hugging Face/OpenAI | Text Generation | ~82MB | ~250MB | ⭐⭐⭐ |
-| `gpt2` | OpenAI | Text Generation | ~500MB | ~700MB | ⭐⭐⭐⭐ |
-| `flan-t5-small` | Google | Instruction Following | ~300MB | ~450MB | ⭐⭐⭐⭐ |
-| `distilbert-sentiment` | Hugging Face | Sentiment + Chat | ~250MB | ~400MB | ⭐⭐⭐ |
+| `Xenova/distilgpt2` | Hugging Face/OpenAI | Text Generation | ~82MB | ~250MB | ⭐⭐⭐ |
+| `Xenova/gpt2` | OpenAI | Text Generation | ~500MB | ~700MB | ⭐⭐⭐⭐ |
+| `Xenova/LaMini-Flan-T5-248M` | LaMini | Text2Text Generation | ~248MB | ~300MB | ⭐⭐⭐⭐ |
+| `Xenova/flan-t5-small` | Google | Instruction Following | ~300MB | ~450MB | ⭐⭐⭐⭐ |
+| `Xenova/distilbert-base-uncased-finetuned-sst-2-english` | Hugging Face | Sentiment + Chat | ~250MB | ~400MB | ⭐⭐⭐ |
+| `Xenova/distilbert-base-cased-distilled-squad` | Hugging Face | Question Answering | ~250MB | ~400MB | ⭐⭐⭐⭐ |
 
 ### Memory Requirements by Azure Plan
 
 | Azure Plan | Available RAM | Recommended Models | RAG Support |
 |------------|---------------|-------------------|-------------|
-| **Free F1** | 1GB | `distilgpt2` only | Limited |
-| **Basic B1** | 1.75GB | `distilgpt2` | ✅ Good |
-| **Standard S1** | 1.75GB | `distilgpt2`, `bert-qa` | ✅ Good |
-| **Standard S2** | 3.5GB | `gpt2`, `flan-t5-small` | ✅ Excellent |
+| **Free F1** | 1GB | `Xenova/distilgpt2` only | Limited |
+| **Basic B1** | 1.75GB | `Xenova/distilgpt2`, `Xenova/LaMini-Flan-T5-248M` | ✅ Good |
+| **Standard S1** | 1.75GB | `Xenova/LaMini-Flan-T5-248M`, `Xenova/distilgpt2` | ✅ Good |
+| **Standard S2** | 3.5GB | `Xenova/gpt2`, `Xenova/flan-t5-small` | ✅ Excellent |
 | **Premium P1V2+** | 7GB+ | All models | ✅ Full Features |
 
 ## 🛠️ Local Development Setup
@@ -151,52 +157,58 @@ Create your `.env` file (see configuration section above).
 ```env
 # Minimal setup for local development
 USE_LOCAL_MODEL=true
-LOCAL_MODEL_NAME=distilgpt2
+LOCAL_MODEL_NAME=Xenova/LaMini-Flan-T5-248M
+WEBSITE_AUTO_CRAWL=true
 PORT=3000
 ```
 
-### 4. Start the Application
+### 4. Create Required Directories
+```bash
+mkdir uploads
+```
+
+### 5. Start the Application
 ```bash
 npm start
 ```
 
-### 5. Access the Application
+### 6. Access the Application
 - **Main Chat Interface**: http://localhost:3000
+- **Admin Panel**: http://localhost:3000/admin.html
 - **Knowledge Base**: http://localhost:3000/dogs-qa.html
 - **Health Check**: http://localhost:3000/api/health
 - **Model Status**: http://localhost:3000/api/model/status
 - **Website Crawl Status**: http://localhost:3000/api/website/status
 - **Debug Environment**: http://localhost:3000/api/debug/env
 
-### 6. Initialize RAG (Optional)
+### 7. Initialize System (Automatic)
 The system will automatically:
 - Download and initialize the local model on first use
 - Initialize the embedder for RAG functionality
 - Auto-crawl your website if `WEBSITE_AUTO_CRAWL=true`
+- Create the uploads directory for document storage
 
 ## 📚 RAG (Retrieval-Augmented Generation) Features
 
 ### Document Upload
 Upload documents to enhance the chatbot's knowledge:
 
-```bash
-# Upload a document via API
-curl -X POST http://localhost:3000/api/upload \
-  -F "file=@document.pdf" \
-  -F "description=Company policies"
-```
-
 **Supported Formats:**
 - `.txt` - Plain text files
-- `.pdf` - PDF documents
-- `.docx` - Microsoft Word documents
+- `.pdf` - PDF documents (parsed with pdf-parse)
+- `.docx` - Microsoft Word documents (parsed with mammoth)
 - `.md` - Markdown files
+
+**File Limits:**
+- Maximum file size: 10MB
+- Automatic text extraction and chunking
+- Vector embedding generation for semantic search
 
 ### Website Crawling
 Automatically crawl and index website content:
 
 ```bash
-# Crawl a website
+# Manual crawl via API
 curl -X POST http://localhost:3000/api/website/crawl \
   -H "Content-Type: application/json" \
   -d '{
@@ -207,11 +219,18 @@ curl -X POST http://localhost:3000/api/website/crawl \
   }'
 
 # Auto-crawl current website
-curl -X POST http://localhost:3000/api/website/auto-crawl
+curl http://localhost:3000/api/website/auto-crawl
 ```
 
+### Crawling Features
+- **Robots.txt Compliance**: Automatically respects robots.txt rules
+- **Smart Content Extraction**: Uses Cheerio to extract meaningful content
+- **Link Discovery**: Automatically finds and follows internal links
+- **Error Handling**: Robust error handling with detailed logging
+- **Progress Tracking**: Real-time crawl progress monitoring
+
 ### RAG Configuration
-Fine-tune RAG behavior:
+Fine-tune RAG behavior through environment variables or admin panel:
 
 ```bash
 # Check RAG status
@@ -223,12 +242,12 @@ curl http://localhost:3000/api/website/status
 
 ### How RAG Works
 1. **Document Processing**: Uploaded files are parsed and chunked into manageable pieces
-2. **Embedding Generation**: Each chunk is converted to vector embeddings
+2. **Embedding Generation**: Each chunk is converted to vector embeddings using `all-MiniLM-L6-v2`
 3. **Query Processing**: User questions are embedded using the same model
-4. **Similarity Search**: Find the most relevant document chunks
-5. **Context Injection**: Relevant content is added to the AI prompt
+4. **Similarity Search**: Find the most relevant document chunks using cosine similarity
+5. **Context Injection**: Relevant content is added to the AI prompt with source attribution
 6. **Response Generation**: AI generates answers based on retrieved context
-7. **Source Attribution**: Responses include references to source documents
+7. **Source Attribution**: Responses include references to source documents with URLs
 
 ## 🌐 Website Crawling Features
 
@@ -241,23 +260,12 @@ WEBSITE_MAX_PAGES=50
 WEBSITE_CRAWL_DELAY=1000
 ```
 
-### Manual Crawling
-Trigger crawls manually for external websites:
-
-```javascript
-// Example: Crawl a documentation site
-fetch('/api/website/crawl', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    baseUrl: 'https://docs.example.com',
-    maxPages: 30,
-    respectRobots: true,
-    includeExternalLinks: false,
-    crawlDelay: 1500
-  })
-});
-```
+### Manual Crawling via Admin Panel
+Use the comprehensive admin panel at `/admin.html` for:
+- **Custom Website Crawling**: Enter any URL to crawl external sites
+- **Real-time Progress**: Monitor crawl progress and statistics
+- **Error Tracking**: View crawl errors and troubleshooting information
+- **Content Management**: View indexed content and statistics
 
 ### Crawl Configuration
 
@@ -267,6 +275,13 @@ fetch('/api/website/crawl', {
 | `respectRobots` | Follow robots.txt rules | true | true/false |
 | `includeExternalLinks` | Crawl external domains | false | true/false |
 | `crawlDelay` | Delay between requests (ms) | 1000 | 500-5000 |
+| `userAgent` | Crawler user agent | WebAppChatbot/1.0 | Custom string |
+
+### Content Extraction
+- **Smart Selectors**: Prioritizes main content areas
+- **Metadata Extraction**: Captures titles, descriptions, and headings
+- **Content Filtering**: Removes navigation, ads, and boilerplate content
+- **Duplicate Detection**: Prevents indexing of duplicate content
 
 ## 🔧 API Endpoints
 
@@ -274,21 +289,50 @@ fetch('/api/website/crawl', {
 - `POST /api/chat` - Send message to AI with RAG support
 - `POST /api/model/initialize` - Initialize/switch local model
 - `GET /api/model/status` - Check model status and configuration
+- `POST /api/model/test-download` - Test model availability
 
 ### Document Management
-- `POST /api/upload` - Upload documents for RAG
-- `GET /api/documents` - List uploaded documents
-- `DELETE /api/documents/:id` - Remove document
+- `POST /api/upload` - Upload documents for RAG (configured but not shown in current code)
+- `GET /api/documents` - List uploaded documents (configured but not shown in current code)
+- `DELETE /api/documents/:id` - Remove document (configured but not shown in current code)
 
 ### Website Crawling
 - `POST /api/website/crawl` - Crawl external website
-- `POST /api/website/auto-crawl` - Crawl current website
+- `GET /api/website/auto-crawl` - Auto-crawl current website (browser-friendly)
+- `POST /api/website/auto-crawl` - Auto-crawl current website (API)
 - `GET /api/website/status` - Check crawl status and statistics
 
 ### Monitoring & Debug
 - `GET /api/health` - Comprehensive health check
 - `GET /api/debug/env` - Environment variables (masked)
-- `GET /api/system/memory` - Memory usage statistics
+- `GET /api/system/memory` - Memory usage statistics (via debug/env)
+
+## 🖥️ Admin Panel Features
+
+Access the full-featured admin panel at `/admin.html`:
+
+### Website Crawling Management
+- **Quick Actions**: Start auto-crawl, check status, health checks
+- **Custom Crawl**: Configure and start custom website crawls
+- **Real-time Status**: Live updates on crawl progress and statistics
+- **Error Monitoring**: View and troubleshoot crawl errors
+
+### Model Management
+- **Model Switching**: Change local models without restart
+- **Status Monitoring**: Real-time model status and memory usage
+- **Model Testing**: Test model availability and downloads
+- **Performance Metrics**: Monitor inference speed and resource usage
+
+### System Monitoring
+- **Health Dashboard**: Comprehensive system health overview
+- **Memory Tracking**: Real-time memory usage monitoring
+- **Configuration View**: Environment and configuration status
+- **Debug Tools**: Direct access to debug endpoints
+
+### Test Interface
+- **Chat Testing**: Test chat functionality with different configurations
+- **RAG Testing**: Test RAG with/without website content
+- **Response Analysis**: View response metadata and performance metrics
 
 ## 🚀 Azure Deployment
 
@@ -299,7 +343,7 @@ Configure these application settings in your Azure Web App:
 | Name | Value | Notes |
 |------|-------|-------|
 | `USE_LOCAL_MODEL` | `true` | Enable local model mode |
-| `LOCAL_MODEL_NAME` | `distilgpt2` | Choose based on your plan |
+| `LOCAL_MODEL_NAME` | `Xenova/LaMini-Flan-T5-248M` | Choose based on your plan |
 | `RAG_CHUNK_SIZE` | `500` | Optimize for your use case |
 | `WEBSITE_AUTO_CRAWL` | `true` | Enable auto-crawling |
 | `WEBSITE_MAX_PAGES` | `20` | Limit for Azure plans |
@@ -334,27 +378,36 @@ curl -X POST http://localhost:3000/api/chat \
   }'
 ```
 
-### Upload and Query Documents
-```bash
-# Upload a document
-curl -X POST http://localhost:3000/api/upload \
-  -F "file=@company-handbook.pdf"
-
-# Ask a question about the document
-curl -X POST http://localhost:3000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What is our vacation policy?"}'
-```
-
 ### Model Management
 ```bash
 # Switch to a different model
 curl -X POST http://localhost:3000/api/model/initialize \
   -H "Content-Type: application/json" \
-  -d '{"modelName": "gpt2"}'
+  -d '{"modelName": "Xenova/gpt2"}'
 
 # Check model status
 curl http://localhost:3000/api/model/status
+
+# Test model download
+curl -X POST http://localhost:3000/api/model/test-download \
+  -H "Content-Type: application/json" \
+  -d '{"modelName": "Xenova/distilgpt2"}'
+```
+
+### Website Crawling
+```bash
+# Crawl external website
+curl -X POST http://localhost:3000/api/website/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseUrl": "https://docs.example.com",
+    "maxPages": 20,
+    "respectRobots": true,
+    "crawlDelay": 1000
+  }'
+
+# Check crawl status
+curl http://localhost:3000/api/website/status
 ```
 
 ## 🔍 Troubleshooting
@@ -368,7 +421,7 @@ curl http://localhost:3000/api/model/status
    - Ensure sufficient memory for the selected model
 
 2. **Memory issues**
-   - Use smaller models (`distilgpt2` instead of `gpt2`)
+   - Use smaller models (`Xenova/distilgpt2` instead of `Xenova/gpt2`)
    - Check memory usage: `GET /api/debug/env`
    - Restart application to clear memory
 
@@ -377,33 +430,29 @@ curl http://localhost:3000/api/model/status
    - Check if documents are uploaded/crawled
    - Verify `useRAG: true` in chat requests
 
-#### Document Upload Issues
-4. **File upload fails**
-   - Check file size (10MB limit)
-   - Ensure file type is supported (.txt, .pdf, .docx, .md)
-   - Verify uploads directory exists and is writable
-
-5. **PDF parsing errors**
-   - Ensure PDF is not password-protected
-   - Try converting to .txt first for testing
-   - Check server logs for specific error details
-
 #### Website Crawling Issues
-6. **Crawling fails**
+4. **Crawling fails**
    - Check robots.txt compliance (`respectRobots: false` for testing)
    - Verify target website is accessible
    - Reduce `maxPages` for initial testing
+   - Use admin panel for real-time error monitoring
 
-7. **No content indexed**
+5. **No content indexed**
    - Check crawl status: `GET /api/website/status`
    - Ensure pages have substantial content (>100 characters)
    - Verify crawl delay is appropriate for target site
 
+#### Admin Panel Issues
+6. **Admin panel not accessible**
+   - Ensure server is running on correct port
+   - Check that `/admin.html` file exists in public directory
+   - Verify no firewall blocking access
+
 ### Performance Optimization
 
 #### Local Models
-- Start with `distilgpt2` for fastest performance
-- Monitor memory usage regularly
+- Start with `Xenova/LaMini-Flan-T5-248M` for best balance
+- Monitor memory usage regularly through admin panel
 - Consider model switching based on request complexity
 
 #### RAG Performance
@@ -460,11 +509,13 @@ curl http://localhost:3000/api/website/status
 webappchatbot/
 ├── 📁 public/
 │   ├── index.html              # Main chat interface with debug panel
+│   ├── admin.html              # Comprehensive admin panel
 │   └── dogs-qa.html            # Example knowledge base page
 ├── 📁 uploads/                 # Uploaded documents (auto-created)
 ├── 📁 .github/workflows/
 │   └── main_joerob-chatbot.yml # Azure deployment workflow
 ├── 📄 server.js                # Main server with RAG, crawling, local models
+├── 📄 test-models.js           # Model testing utility
 ├── 📄 package.json             # Dependencies including transformers
 ├── 📄 .env                     # Environment configuration (not in git)
 ├── 📄 .gitignore               # Git ignore rules
@@ -479,31 +530,43 @@ webappchatbot/
 - **Development**: Use local models for fast iteration
 - **Production**: Switch to Azure OpenAI for best quality
 - **Fallback**: Automatic fallback between local and cloud models
+- **Model Testing**: Built-in utilities for testing model availability
 
 ### Content Management
 - **Document Versioning**: Track document updates and changes
 - **Content Expiration**: Automatic refresh of crawled content
 - **Source Prioritization**: Weight different content sources
+- **Real-time Analytics**: Live monitoring through admin panel
 
 ### Customization Options
-- **Model Switching**: Change models without restart
+- **Model Switching**: Change models without restart through admin panel
 - **RAG Tuning**: Adjust retrieval parameters per use case
 - **Custom Crawling**: Specialized crawlers for specific sites
+- **Debug Interface**: Comprehensive debugging and monitoring tools
 
-## 🚀 Future Enhancements
+## 🚀 Development Tools
 
-### Planned Features
-- **Ollama Integration**: Support for larger local models
-- **Vector Database**: Persistent storage for embeddings
-- **Multi-language Support**: Support for non-English content
-- **Streaming Responses**: Real-time response streaming
-- **Advanced Analytics**: Usage patterns and performance metrics
+### Model Testing
+Use the included `test-models.js` utility to test model availability:
 
-### Integration Opportunities
-- **Database Integration**: Connect to existing databases
-- **API Integrations**: External knowledge sources
-- **Authentication**: User management and access control
-- **Caching**: Redis for improved performance
+```bash
+node test-models.js
+```
+
+This will test all configured models and report their availability and download status.
+
+### Admin Interface
+The admin panel provides:
+- **Real-time Monitoring**: Live updates on system status
+- **Interactive Testing**: Test all functionality through the web interface
+- **Error Diagnostics**: Detailed error reporting and troubleshooting
+- **Performance Monitoring**: Resource usage and response time tracking
+
+### Debug Endpoints
+- `/api/health` - Comprehensive system health
+- `/api/debug/env` - Environment and memory information
+- `/api/model/status` - Model status and configuration
+- `/api/website/status` - Crawling status and statistics
 
 ## 🤝 Contributing
 
@@ -512,14 +575,16 @@ webappchatbot/
 3. Test with both local and Azure models
 4. Test RAG functionality with sample documents
 5. Ensure memory usage is reasonable
-6. Submit a pull request
+6. Test admin panel functionality
+7. Submit a pull request
 
 ### Development Guidelines
-- Test with multiple model types
+- Test with multiple model types using the admin panel
 - Verify RAG performance with various document types
 - Check memory usage with different configurations
-- Ensure backward compatibility
-- Add appropriate error handling
+- Ensure admin panel functionality works correctly
+- Add appropriate error handling and logging
+- Update documentation for new features
 
 ## 📄 License
 
@@ -529,10 +594,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Getting Help
 
-1. **Quick Start Issues**: Follow the troubleshooting guide above
-2. **Model Selection**: Use the model recommendation table
-3. **RAG Problems**: Check health endpoints for system status
-4. **Performance Issues**: Monitor memory usage and optimize configuration
+1. **Quick Start Issues**: Use the admin panel for real-time diagnostics
+2. **Model Selection**: Use the model recommendation table and admin panel testing
+3. **RAG Problems**: Check health endpoints and admin panel status
+4. **Performance Issues**: Monitor memory usage through admin panel
 5. **Deployment Issues**: Verify Azure configuration settings
 
 ### Useful Debug Commands
@@ -553,24 +618,24 @@ curl http://localhost:3000/api/debug/env
 # Test model switching
 curl -X POST http://localhost:3000/api/model/initialize \
   -H "Content-Type: application/json" \
-  -d '{"modelName": "distilgpt2"}'
+  -d '{"modelName": "Xenova/distilgpt2"}'
 ```
 
-### Community & Issues
-
-- **GitHub Issues**: Report bugs and request features
-- **Discussions**: Share tips and use cases
-- **Documentation**: Contribute to improve this guide
+### Admin Panel Features
+- **Real-time Status**: Live system monitoring
+- **Interactive Testing**: Test all functionality through the web interface
+- **Error Diagnostics**: Detailed error reporting and troubleshooting
+- **Performance Monitoring**: Resource usage and response time tracking
 
 ---
 
 ## 🎯 Quick Start Recommendations
 
-- **New Users**: Start with `distilgpt2` and auto-crawl enabled
-- **Better Quality**: Upgrade to `gpt2` when ready
+- **New Users**: Start with `Xenova/LaMini-Flan-T5-248M` and use the admin panel
+- **Better Quality**: Upgrade to `Xenova/gpt2` when ready
 - **Production**: Consider Azure OpenAI for best results
-- **Limited Memory**: Stick with `distilgpt2` and optimize RAG settings
-- **Development**: Use local models for fast iteration
+- **Limited Memory**: Stick with `Xenova/distilgpt2` and optimize RAG settings
+- **Development**: Use local models with the admin panel for fast iteration
 - **Enterprise**: Combine local models with Azure OpenAI fallback
 
-This comprehensive chatbot solution provides enterprise-grade AI capabilities with the flexibility to run entirely local or leverage cloud services as needed.
+This comprehensive chatbot solution provides enterprise-grade AI capabilities with an intuitive admin interface and the flexibility to run entirely local or leverage cloud services as needed.
