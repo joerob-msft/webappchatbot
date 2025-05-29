@@ -2,6 +2,18 @@ const express = require('express');
 const path = require('path');
 const app = express();
 
+// Add Transformers.js import
+let pipeline;
+(async () => {
+    const { pipeline: importedPipeline } = await import('@xenova/transformers');
+    pipeline = importedPipeline;
+})();
+
+// Add model loading state
+let localModel = null;
+let modelLoading = false;
+let modelError = null;
+
 // Middleware
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -11,6 +23,136 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
     next();
 });
+
+// Local model configurations
+function getLocalModelInfo(modelName) {
+    const models = {
+        'distilgpt2': {
+            task: 'text-generation',
+            name: 'Xenova/distilgpt2',
+            type: 'generation',
+            size: 'small',
+            description: 'Fast, lightweight text generation'
+        },
+        'gpt2': {
+            task: 'text-generation',
+            name: 'Xenova/gpt2',
+            type: 'generation',
+            size: 'medium',
+            description: 'Standard GPT-2 model'
+        },
+        'distilbert-sentiment': {
+            task: 'sentiment-analysis',
+            name: 'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
+            type: 'sentiment',
+            size: 'small',
+            description: 'Sentiment analysis with conversational response'
+        },
+        'bert-qa': {
+            task: 'question-answering',
+            name: 'Xenova/distilbert-base-cased-distilled-squad',
+            type: 'qa',
+            size: 'small',
+            description: 'Question answering model'
+        },
+        'flan-t5-small': {
+            task: 'text2text-generation',
+            name: 'Xenova/flan-t5-small',
+            type: 'text2text',
+            size: 'small',
+            description: 'Instruction-following text generation'
+        }
+    };
+    
+    return models[modelName] || models['distilgpt2'];
+}
+
+// Initialize local model
+async function initializeLocalModel(modelName = 'distilgpt2') {
+    if (modelLoading) {
+        console.log('Model already loading...');
+        return false;
+    }
+    
+    if (!pipeline) {
+        console.log('Pipeline not ready yet, waiting...');
+        return false;
+    }
+    
+    try {
+        modelLoading = true;
+        modelError = null;
+        console.log(`\n=== INITIALIZING LOCAL MODEL: ${modelName} ===`);
+        
+        const modelInfo = getLocalModelInfo(modelName);
+        console.log('Model info:', modelInfo);
+        
+        console.log('Loading model... This may take a few minutes on first run.');
+        localModel = await pipeline(modelInfo.task, modelInfo.name);
+        
+        console.log('✅ Local model loaded successfully!');
+        console.log('=== MODEL INITIALIZATION COMPLETE ===\n');
+        modelLoading = false;
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Failed to load local model:', error);
+        modelError = error.message;
+        modelLoading = false;
+        localModel = null;
+        return false;
+    }
+}
+
+// Generate response using local model
+async function generateLocalResponse(message, modelName = 'distilgpt2') {
+    if (!localModel) {
+        throw new Error('Local model not initialized');
+    }
+    
+    const modelInfo = getLocalModelInfo(modelName);
+    
+    try {
+        if (modelInfo.task === 'text-generation') {
+            const result = await localModel(message, {
+                max_new_tokens: 100,
+                temperature: 0.7,
+                do_sample: true,
+                return_full_text: false
+            });
+            
+            return result[0].generated_text.trim();
+            
+        } else if (modelInfo.task === 'sentiment-analysis') {
+            const result = await localModel(message);
+            const sentiment = result[0];
+            return `I analyzed your message sentiment as ${sentiment.label.toLowerCase()} (${(sentiment.score * 100).toFixed(1)}% confidence). How can I help you further?`;
+            
+        } else if (modelInfo.task === 'question-answering') {
+            // For Q&A, we need a context. Using a general context
+            const context = "I am a helpful AI assistant designed to answer questions and have conversations. I can help with various topics including general knowledge, explanations, and problem-solving.";
+            const result = await localModel({
+                question: message,
+                context: context
+            });
+            
+            return result.answer || "I'm not sure about that specific question. Could you provide more context or try rephrasing?";
+            
+        } else if (modelInfo.task === 'text2text-generation') {
+            const result = await localModel(message, {
+                max_new_tokens: 100
+            });
+            
+            return result[0].generated_text.trim();
+        }
+        
+        return "I received your message but couldn't process it with the current model configuration.";
+        
+    } catch (error) {
+        console.error('Error generating local response:', error);
+        throw error;
+    }
+}
 
 function getModelInfo(deploymentName) {
     const name = deploymentName.toLowerCase();
@@ -70,6 +212,7 @@ function getModelInfo(deploymentName) {
 function isO1Model(deploymentName) {
     return getModelInfo(deploymentName).series === 'o1';
 }
+
 // Helper function to get appropriate API version for model
 function getApiVersion(deploymentName) {
     const modelInfo = getModelInfo(deploymentName);
@@ -120,7 +263,7 @@ function getModelParameters(deploymentName) {
     return baseParams;
 }
 
-// Chat API endpoint with model-aware handling
+// Enhanced Chat API endpoint with local model support
 app.post('/api/chat', async (req, res) => {
     const startTime = Date.now();
     console.log('\n=== CHAT API REQUEST START ===');
@@ -137,6 +280,90 @@ app.post('/api/chat', async (req, res) => {
                 details: 'No message provided in request body'
             });
         }
+
+        // Check if we should use local model
+        const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
+        const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+        
+        console.log('Model Configuration:');
+        console.log('- Use Local Model:', useLocalModel);
+        console.log('- Local Model Name:', localModelName);
+        console.log('- Model Loading:', modelLoading);
+        console.log('- Model Loaded:', !!localModel);
+        console.log('- Model Error:', modelError);
+
+        if (useLocalModel) {
+            // Initialize model if not already loaded
+            if (!localModel && !modelLoading && !modelError) {
+                console.log('Initializing local model...');
+                const initialized = await initializeLocalModel(localModelName);
+                if (!initialized) {
+                    return res.status(500).json({
+                        error: 'Failed to initialize local model',
+                        details: modelError || 'Model initialization failed',
+                        troubleshooting: 'Check server logs and ensure the model name is valid'
+                    });
+                }
+            }
+            
+            // Wait for model to finish loading if it's currently loading
+            if (modelLoading) {
+                console.log('Model is still loading...');
+                return res.status(202).json({
+                    error: 'Model is loading',
+                    details: 'The local model is currently being initialized. Please try again in a moment.',
+                    status: 'loading',
+                    estimatedWaitTime: '30-60 seconds'
+                });
+            }
+            
+            // Check if model failed to load
+            if (modelError) {
+                return res.status(500).json({
+                    error: 'Local model failed to load',
+                    details: modelError,
+                    troubleshooting: 'Check server logs and ensure sufficient memory is available'
+                });
+            }
+            
+            // Generate response using local model
+            if (localModel) {
+                console.log('Generating response with local model...');
+                
+                try {
+                    const aiResponse = await generateLocalResponse(message, localModelName);
+                    const duration = Date.now() - startTime;
+                    
+                    console.log('SUCCESS: Local model response generated');
+                    console.log('Response length:', aiResponse.length);
+                    console.log('Duration:', duration + 'ms');
+                    console.log('=== CHAT API REQUEST END ===\n');
+                    
+                    return res.json({
+                        response: aiResponse,
+                        metadata: {
+                            duration: duration,
+                            model: localModelName,
+                            modelType: 'local-transformers',
+                            timestamp: new Date().toISOString(),
+                            source: 'server-side-local',
+                            modelInfo: getLocalModelInfo(localModelName)
+                        }
+                    });
+                    
+                } catch (error) {
+                    console.error('Error with local model:', error);
+                    return res.status(500).json({
+                        error: 'Local model inference failed',
+                        details: error.message,
+                        troubleshooting: 'The local model encountered an error during inference'
+                    });
+                }
+            }
+        }
+
+        // Fall back to existing Azure OpenAI logic
+        console.log('Using Azure OpenAI...');
 
         // Check environment variables with detailed logging
         const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
@@ -254,7 +481,8 @@ app.post('/api/chat', async (req, res) => {
                 model: deployment,
                 modelType: isO1 ? 'o1-series' : 'gpt-series',
                 timestamp: new Date().toISOString(),
-                usage: data.usage
+                usage: data.usage,
+                source: 'azure-openai'
             }
         });
 
@@ -279,15 +507,87 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
+// Model management endpoints
+app.post('/api/model/initialize', async (req, res) => {
+    const { modelName } = req.body;
+    const targetModel = modelName || process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+    
+    console.log(`\n=== MODEL INITIALIZATION REQUEST ===`);
+    console.log('Target model:', targetModel);
+    
+    if (modelLoading) {
+        return res.status(409).json({
+            error: 'Model already loading',
+            details: 'A model is currently being initialized'
+        });
+    }
+    
+    const success = await initializeLocalModel(targetModel);
+    
+    res.json({
+        success: success,
+        model: targetModel,
+        status: success ? 'loaded' : 'failed',
+        error: modelError,
+        timestamp: new Date().toISOString(),
+        modelInfo: success ? getLocalModelInfo(targetModel) : null
+    });
+});
+
+app.get('/api/model/status', (req, res) => {
+    const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
+    const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+    const modelInfo = getLocalModelInfo(localModelName);
+    
+    res.json({
+        configuration: {
+            useLocal: useLocalModel,
+            modelName: localModelName
+        },
+        model: localModelName,
+        modelInfo: modelInfo,
+        status: {
+            loaded: !!localModel,
+            loading: modelLoading,
+            error: modelError,
+            pipelineReady: !!pipeline
+        },
+        availableModels: [
+            'distilgpt2',
+            'gpt2', 
+            'distilbert-sentiment',
+            'bert-qa',
+            'flan-t5-small'
+        ],
+        timestamp: new Date().toISOString()
+    });
+});
+
+app.get('/api/system/memory', (req, res) => {
+    const usage = process.memoryUsage();
+    res.json({
+        memory: {
+            rss: `${Math.round(usage.rss / 1024 / 1024)} MB`,
+            heapTotal: `${Math.round(usage.heapTotal / 1024 / 1024)} MB`,
+            heapUsed: `${Math.round(usage.heapUsed / 1024 / 1024)} MB`,
+            external: `${Math.round(usage.external / 1024 / 1024)} MB`
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Enhanced health check endpoint
 app.get('/api/health', (req, res) => {
     console.log('\n=== HEALTH CHECK REQUEST ===');
     
+    const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
+    const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
     const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-    const isO1 = isO1Model(deployment);
-    const apiVersion = getApiVersion(deployment);
+    const isO1 = deployment ? isO1Model(deployment) : false;
+    const apiVersion = deployment ? getApiVersion(deployment) : null;
     
-    const config = {
+    // Azure configuration check
+    const azureConfig = {
         endpoint: {
             set: !!process.env.AZURE_OPENAI_ENDPOINT,
             value: process.env.AZURE_OPENAI_ENDPOINT ? 
@@ -307,17 +607,40 @@ app.get('/api/health', (req, res) => {
         apiVersion: process.env.AZURE_OPENAI_VERSION || 'auto-detected'
     };
     
-    const allConfigured = config.endpoint.set && config.apiKey.set && config.deployment.set;
+    // Local model status
+    const localModelStatus = {
+        enabled: useLocalModel,
+        modelName: localModelName,
+        loaded: !!localModel,
+        loading: modelLoading,
+        error: modelError,
+        pipelineReady: !!pipeline,
+        modelInfo: useLocalModel ? getLocalModelInfo(localModelName) : null
+    };
     
-    console.log('Health check configuration:', JSON.stringify(config, null, 2));
-    console.log('All configured:', allConfigured);
+    const azureConfigured = azureConfig.endpoint.set && azureConfig.apiKey.set && azureConfig.deployment.set;
+    const localConfigured = useLocalModel ? (!!localModel && !modelError) : true;
+    
+    const overallStatus = (useLocalModel ? localConfigured : azureConfigured) ? 'ok' : 'misconfigured';
+    
+    console.log('Health check - Mode:', useLocalModel ? 'local' : 'azure');
+    console.log('Health check - Azure config:', JSON.stringify(azureConfig, null, 2));
+    console.log('Health check - Local model:', JSON.stringify(localModelStatus, null, 2));
+    console.log('Overall status:', overallStatus);
     console.log('=== HEALTH CHECK END ===\n');
     
     res.json({ 
-        status: allConfigured ? 'ok' : 'misconfigured',
+        status: overallStatus,
         timestamp: new Date().toISOString(),
-        config: config,
-        modelInfo: {
+        mode: useLocalModel ? 'local' : 'azure',
+        azure: azureConfig,
+        localModel: localModelStatus,
+        modelInfo: useLocalModel ? {
+            model: localModelName,
+            type: 'local-transformers',
+            supportedFeatures: ['text-generation', 'sentiment-analysis', 'question-answering'],
+            memoryUsage: process.memoryUsage()
+        } : {
             deployment: deployment,
             type: isO1 ? 'o1-series' : 'gpt-series',
             supportedRoles: isO1 ? ['user', 'assistant'] : ['system', 'user', 'assistant'],
@@ -330,11 +653,13 @@ app.get('/api/health', (req, res) => {
             platform: process.platform,
             uptime: process.uptime()
         },
-        missingConfig: [
-            !config.endpoint.set && 'AZURE_OPENAI_ENDPOINT',
-            !config.apiKey.set && 'AZURE_OPENAI_KEY',
-            !config.deployment.set && 'AZURE_OPENAI_DEPLOYMENT'
-        ].filter(Boolean)
+        recommendations: useLocalModel ? 
+            (!localModel ? ['Initialize the local model via POST /api/model/initialize'] : []) :
+            [
+                !azureConfig.endpoint.set && 'Set AZURE_OPENAI_ENDPOINT',
+                !azureConfig.apiKey.set && 'Set AZURE_OPENAI_KEY',
+                !azureConfig.deployment.set && 'Set AZURE_OPENAI_DEPLOYMENT'
+            ].filter(Boolean)
     });
 });
 
@@ -345,18 +670,24 @@ app.get('/api/debug/env', (req, res) => {
     
     const envVars = {};
     Object.keys(process.env).forEach(key => {
-        if (key.includes('AZURE') || key.includes('OPENAI')) {
+        if (key.includes('AZURE') || key.includes('OPENAI') || key.includes('LOCAL') || key.includes('USE_LOCAL')) {
             envVars[key] = process.env[key] ? 
-                          `${process.env[key].substring(0, 10)}...` : 
+                          (key.includes('KEY') ? `${process.env[key].substring(0, 10)}...` : process.env[key]) : 
                           'NOT SET';
         }
     });
     
-    console.log('Azure/OpenAI related env vars:', envVars);
+    console.log('Azure/OpenAI/Local related env vars:', envVars);
     console.log('=== DEBUG ENV END ===\n');
     
     res.json({
-        azureOpenAIVars: envVars,
+        configVars: envVars,
+        localModelStatus: {
+            pipelineReady: !!pipeline,
+            modelLoaded: !!localModel,
+            modelLoading: modelLoading,
+            modelError: modelError
+        },
         totalEnvVars: Object.keys(process.env).length,
         timestamp: new Date().toISOString()
     });
@@ -405,6 +736,8 @@ app.listen(port, () => {
     console.log(`Server running on port: ${port}`);
     console.log(`Health check: http://localhost:${port}/api/health`);
     console.log(`Environment debug: http://localhost:${port}/api/debug/env`);
+    console.log(`Model status: http://localhost:${port}/api/model/status`);
+    console.log(`Memory usage: http://localhost:${port}/api/system/memory`);
     console.log(`Node version: ${process.version}`);
     console.log(`Platform: ${process.platform}`);
     console.log('========================\n');
