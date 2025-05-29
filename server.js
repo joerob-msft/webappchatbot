@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 const express = require('express');
 const path = require('path');
 const app = express();
@@ -129,14 +132,63 @@ async function generateLocalResponse(message, modelName = 'distilgpt2') {
             return `I analyzed your message sentiment as ${sentiment.label.toLowerCase()} (${(sentiment.score * 100).toFixed(1)}% confidence). How can I help you further?`;
             
         } else if (modelInfo.task === 'question-answering') {
-            // For Q&A, we need a context. Using a general context
-            const context = "I am a helpful AI assistant designed to answer questions and have conversations. I can help with various topics including general knowledge, explanations, and problem-solving.";
-            const result = await localModel({
-                question: message,
-                context: context
-            });
+            // Provide a comprehensive knowledge base as context
+            const context = `Artificial Intelligence (AI) is a branch of computer science that aims to create intelligent machines that can perform tasks typically requiring human intelligence. AI systems can learn, reason, perceive, and make decisions.
+
+Key areas of AI include:
+- Machine Learning: Systems that learn from data
+- Natural Language Processing: Understanding and generating human language
+- Computer Vision: Interpreting visual information
+- Robotics: Creating intelligent physical systems
+- Expert Systems: Knowledge-based decision making
+
+AI applications include chatbots, recommendation systems, autonomous vehicles, medical diagnosis, fraud detection, and virtual assistants. AI works by processing large amounts of data, identifying patterns, and making predictions or decisions based on that learning.
+
+Machine learning is a subset of AI that uses algorithms to automatically learn and improve from experience without being explicitly programmed. Deep learning uses neural networks with multiple layers to model complex patterns in data.
+
+AI has both benefits and challenges, including automation of tasks, improved efficiency, but also concerns about job displacement and ethical considerations.`;
             
-            return result.answer || "I'm not sure about that specific question. Could you provide more context or try rephrasing?";
+            try {
+                const result = await localModel({
+                    question: message,
+                    context: context
+                });
+                
+                console.log('Q&A Model Result:', result);
+                
+                // Check if we got a meaningful answer
+                if (result && result.answer && result.answer.trim() && result.answer.length > 3) {
+                    const confidence = result.score || 0;
+                    
+                    // If confidence is reasonable, return the answer
+                    if (confidence > 0.05) {
+                        return `${result.answer.trim()}
+
+(Based on my knowledge base with ${(confidence * 100).toFixed(1)}% confidence)`;
+                    }
+                }
+                
+                // Fallback for low confidence or poor answers
+                return `Based on your question "${message}", here's what I can tell you:
+
+Artificial Intelligence (AI) refers to computer systems that can perform tasks that typically require human intelligence, such as learning, reasoning, and problem-solving. AI includes machine learning, natural language processing, and computer vision.
+
+Would you like me to explain any specific aspect of AI in more detail?`;
+                
+            } catch (qaError) {
+                console.error('Q&A model specific error:', qaError);
+                
+                // Provide a general response based on the question topic
+                if (message.toLowerCase().includes('artificial intelligence') || message.toLowerCase().includes('ai')) {
+                    return `I can help explain artificial intelligence! AI is technology that enables computers to perform tasks that typically require human intelligence, like learning, reasoning, and problem-solving. It includes areas like machine learning, natural language processing, and computer vision.
+
+What specific aspect of AI would you like to know more about?`;
+                }
+                
+                return `I understand you're asking about: "${message}"
+
+While I'm having some technical difficulties with my Q&A processing, I'd be happy to help if you can rephrase your question or ask about something specific. You might also try switching to the 'distilgpt2' model for general conversation.`;
+            }
             
         } else if (modelInfo.task === 'text2text-generation') {
             const result = await localModel(message, {
@@ -150,6 +202,34 @@ async function generateLocalResponse(message, modelName = 'distilgpt2') {
         
     } catch (error) {
         console.error('Error generating local response:', error);
+        console.error('Error details:', {
+            message: error.message,
+            stack: error.stack,
+            modelInfo: modelInfo
+        });
+        
+        // Provide more specific error handling for Q&A models
+        if (modelInfo.task === 'question-answering') {
+            // Try to give a helpful response even when the model fails
+            if (message.toLowerCase().includes('artificial intelligence') || message.toLowerCase().includes('ai')) {
+                return `I can help with that! Artificial Intelligence (AI) is a field of computer science focused on creating systems that can perform tasks requiring human-like intelligence. This includes learning from data, recognizing patterns, making decisions, and understanding language.
+
+Common AI applications include virtual assistants, recommendation systems, and autonomous vehicles. Would you like to know more about any specific area of AI?
+
+(Note: I'm currently experiencing some technical issues with the Q&A model, but I can still provide helpful information!)`;
+            }
+            
+            return `I'd be happy to help answer your question: "${message}"
+
+I'm currently experiencing some technical difficulties with the question-answering model. For the best experience, you might want to:
+
+1. Try rephrasing your question more specifically
+2. Switch to the 'distilgpt2' model for general conversation
+3. Or ask about topics I have specific knowledge about
+
+You can switch models by updating your LOCAL_MODEL_NAME environment variable to 'distilgpt2'.`;
+        }
+        
         throw error;
     }
 }
