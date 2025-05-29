@@ -8,6 +8,7 @@
     "dev": "node server.js"
   },
   "dependencies": {
+    "@azure/openai": "^2.0.0",
     "@xenova/transformers": "^2.6.0",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
@@ -15,6 +16,8 @@
     "express": "^4.18.2",
     "mammoth": "^1.6.0",
     "multer": "^2.0.0",
+    "node-fetch": "^3.3.2",
+    "openai": "^4.103.0",
     "pdf-parse": "^1.1.1",
     "robots-parser": "^3.0.1"
   },

@@ -30,6 +30,20 @@
             margin-bottom: 2rem;
         }
         
+        .quick-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 15px;
+        }
+        
+        .quick-links .button {
+            margin: 0;
+            width: 100%;
+            text-align: center;
+            display: block;
+        }
+        
         .button {
             background: #4CAF50;
             color: white;
@@ -39,6 +53,9 @@
             cursor: pointer;
             font-size: 16px;
             margin: 5px;
+            text-decoration: none;
+            display: inline-block;
+            box-sizing: border-box;
         }
         
         .button:hover {
@@ -125,6 +142,34 @@
         .navigation a:hover {
             color: #667eea;
         }
+        
+        /* Ensure proper spacing for all button containers */
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        
+        .button-group .button {
+            margin: 0;
+            width: 100%;
+        }
+        
+        /* Fix for inline button groups */
+        .button-group.inline {
+            flex-direction: row;
+            flex-wrap: wrap;
+        }
+        
+        .button-group.inline .button {
+            flex: 1;
+            margin-right: 10px;
+        }
+        
+        .button-group.inline .button:last-child {
+            margin-right: 0;
+        }
     </style>
 </head>
 <body>
@@ -167,9 +212,11 @@
                 </div>
                 
                 <h4>Quick Links</h4>
-                <a href="/api/health" target="_blank" class="button secondary">API Health Check</a>
-                <a href="/api/website/status" target="_blank" class="button secondary">Crawl Status API</a>
-                <a href="/api/model/status" target="_blank" class="button secondary">Model Status API</a>
+                <div class="quick-links">
+                    <a href="/api/health" target="_blank" class="button secondary">API Health Check</a>
+                    <a href="/api/website/status" target="_blank" class="button secondary">Crawl Status API</a>
+                    <a href="/api/model/status" target="_blank" class="button secondary">Model Status API</a>
+                </div>
             </div>
         </div>
     </div>
@@ -192,8 +239,10 @@
                     <option value="flan-t5-small">FLAN-T5-Small (Instructions)</option>
                     <option value="distilbert-sentiment">DistilBERT (Sentiment)</option>
                 </select>
-                <button class="button" onclick="switchModel()">🔄 Switch Model</button>
-                <button class="button secondary" onclick="checkModelStatus()">📋 Model Status</button>
+                <div class="button-group inline">
+                    <button class="button" onclick="switchModel()">🔄 Switch Model</button>
+                    <button class="button secondary" onclick="checkModelStatus()">📋 Model Status</button>
+                </div>
             </div>
             
             <div>
@@ -210,14 +259,37 @@
         <div style="margin: 20px 0;">
             <textarea id="testMessage" placeholder="Ask a question to test the chatbot..." style="width: 100%; height: 100px; padding: 10px; border-radius: 5px; border: 1px solid #ddd;"></textarea>
             <br>
-            <label><input type="checkbox" id="useRAG" checked> Use RAG (Document Context)</label>
-            <label><input type="checkbox" id="includeWebsite" checked> Include Website Content</label>
-            <br>
+            <div style="margin: 10px 0;">
+                <label><input type="checkbox" id="useRAG" checked> Use RAG (Document Context)</label>
+                <label style="margin-left: 20px;"><input type="checkbox" id="includeWebsite" checked> Include Website Content</label>
+            </div>
             <button class="button" onclick="testChat()">💬 Send Test Message</button>
         </div>
         <div id="chatResponse" class="status-box" style="display: none;">
             <h4>Response:</h4>
             <div id="chatResponseText"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🌐 Azure OpenAI Testing</h2>
+        <div class="grid">
+            <div>
+                <h3>Azure OpenAI Controls</h3>
+                <div class="button-group">
+                    <button class="button" onclick="testAzureOpenAI()">🧪 Test Azure OpenAI</button>
+                    <button class="button secondary" onclick="checkAzureConfig()">⚙️ Check Configuration</button>
+                </div>
+                <label>Test Message:</label>
+                <input type="text" id="azureTestMessage" placeholder="Hello, how are you?" style="width: 100%; padding: 8px; margin: 5px 0;">
+            </div>
+            
+            <div>
+                <h3>Azure OpenAI Status</h3>
+                <div id="azureOpenAIStatus" class="status-box">
+                    Click "Check Configuration" to view Azure OpenAI status
+                </div>
+            </div>
         </div>
     </div>
 
@@ -443,6 +515,64 @@
                 
             } catch (error) {
                 document.getElementById('chatResponseText').innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        async function testAzureOpenAI() {
+            const testMessage = document.getElementById('azureTestMessage').value || "Hello, how are you?";
+            
+            try {
+                updateStatus('Testing Azure OpenAI connection...', 'loading');
+                
+                const response = await fetch('/api/azure-openai/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: testMessage })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    const statusHtml = `
+                        ✅ Azure OpenAI Test Successful<br>
+                        <strong>Deployment:</strong> ${result.deployment}<br>
+                        <strong>Test Response:</strong> "${result.testResponse}"<br>
+                        <strong>Timestamp:</strong> ${new Date(result.timestamp).toLocaleString()}
+                    `;
+                    document.getElementById('azureOpenAIStatus').innerHTML = statusHtml;
+                    document.getElementById('azureOpenAIStatus').className = 'status-box success';
+                    updateStatus('✅ Azure OpenAI test completed successfully', 'success');
+                } else {
+                    document.getElementById('azureOpenAIStatus').innerHTML = `❌ Error: ${result.error}<br>Details: ${result.details}`;
+                    document.getElementById('azureOpenAIStatus').className = 'status-box error';
+                    updateStatus(`❌ Azure OpenAI test failed: ${result.error}`, 'error');
+                }
+            } catch (error) {
+                document.getElementById('azureOpenAIStatus').innerHTML = `❌ Network Error: ${error.message}`;
+                document.getElementById('azureOpenAIStatus').className = 'status-box error';
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkAzureConfig() {
+            try {
+                const response = await fetch('/api/health');
+                const health = await response.json();
+                
+                const configHtml = `
+                    <h4>🌐 Azure OpenAI Configuration</h4>
+                    <strong>Configured:</strong> ${health.config.azureOpenAIConfigured ? '✅ Yes' : '❌ No'}<br>
+                    <strong>Deployment:</strong> ${health.config.azureOpenAIDeployment}<br>
+                    <strong>Client Ready:</strong> ${health.models.azureOpenAI ? '✅ Yes' : '❌ No'}<br>
+                    <strong>Use Local Model:</strong> ${health.config.useLocalModel ? 'Yes' : 'No'}
+                `;
+                
+                document.getElementById('azureOpenAIStatus').innerHTML = configHtml;
+                document.getElementById('azureOpenAIStatus').className = health.config.azureOpenAIConfigured ? 'status-box success' : 'status-box error';
+                
+            } catch (error) {
+                document.getElementById('azureOpenAIStatus').innerHTML = `❌ Error checking configuration: ${error.message}`;
+                document.getElementById('azureOpenAIStatus').className = 'status-box error';
             }
         }
 

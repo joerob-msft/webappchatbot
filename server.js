@@ -10,6 +10,10 @@ const mammoth = require('mammoth');
 const cheerio = require('cheerio');
 const axios = require('axios');
 const robotsParser = require('robots-parser');
+const OpenAI = require('openai');
+
+// Alternative implementation using node-fetch
+const fetch = require('node-fetch'); // You might need to install this: npm install node-fetch
 
 const app = express();
 
@@ -697,6 +701,234 @@ Answer:`;
     }
 }
 
+// Initialize Azure OpenAI client
+let azureOpenAIClient = null;
+
+// Initialize Azure OpenAI client
+function initializeAzureOpenAI() {
+    if (azureOpenAIClient) return azureOpenAIClient;
+    
+    try {
+        const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+        const apiKey = process.env.AZURE_OPENAI_KEY;
+        const apiVersion = process.env.AZURE_OPENAI_VERSION;
+        
+        console.log('Initializing Azure OpenAI with:');
+        console.log('Endpoint:', endpoint ? endpoint.substring(0, 30) + '...' : 'NOT SET');
+        console.log('API Key:', apiKey ? 'SET (length: ' + apiKey.length + ')' : 'NOT SET');
+        console.log('Deployment:', process.env.AZURE_OPENAI_DEPLOYMENT);
+        console.log('Version:', apiVersion);
+        
+        if (!endpoint || !apiKey) {
+            console.log('⚠️ Azure OpenAI credentials not configured');
+            console.log('Missing:', !endpoint ? 'endpoint' : '', !apiKey ? 'apiKey' : '');
+            return null;
+        }
+        
+        // Create Azure OpenAI client using the updated OpenAI library
+        azureOpenAIClient = new OpenAI({
+            apiKey: apiKey,
+            baseURL: `${endpoint}/openai/deployments/${process.env.AZURE_OPENAI_DEPLOYMENT}`,
+            defaultQuery: { 'api-version': apiVersion },
+            defaultHeaders: {
+                'api-key': apiKey,
+            },
+        });
+        
+        console.log('✅ Azure OpenAI client initialized');
+        return azureOpenAIClient;
+        
+    } catch (error) {
+        console.error('❌ Failed to initialize Azure OpenAI client:', error);
+        return null;
+    }
+}
+
+// Generate response using Azure OpenAI with RAG
+async function generateAzureOpenAIResponseWithRAG(message, useRAG = true, includeWebsiteContent = true) {
+    if (!azureOpenAIClient) {
+        azureOpenAIClient = initializeAzureOpenAI();
+        if (!azureOpenAIClient) {
+            throw new Error('Azure OpenAI client not available');
+        }
+    }
+    
+    let context = '';
+    let sources = [];
+    
+    // Retrieve relevant documents if RAG is enabled
+    if (useRAG && documentEmbeddings.length > 0) {
+        console.log('Retrieving relevant documents for Azure OpenAI RAG...');
+        
+        // Filter embeddings based on preferences
+        let availableEmbeddings = documentEmbeddings;
+        if (!includeWebsiteContent) {
+            availableEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+        }
+        
+        if (availableEmbeddings.length > 0) {
+            // Initialize embedder for RAG if needed
+            if (!embedder) {
+                await initializeEmbedder();
+            }
+            
+            if (embedder) {
+                const queryEmbedding = await generateEmbedding(message);
+                
+                const similarities = availableEmbeddings.map((docEmb, index) => ({
+                    index,
+                    similarity: cosineSimilarity(queryEmbedding, docEmb.embedding),
+                    chunk: docEmb.chunk,
+                    source: docEmb.source,
+                    url: docEmb.url || null,
+                    type: docEmb.type || 'document'
+                }));
+                
+                const relevantChunks = similarities
+                    .sort((a, b) => b.similarity - a.similarity)
+                    .slice(0, parseInt(process.env.RAG_TOP_K) || 3);
+                
+                if (relevantChunks.length > 0) {
+                    context = relevantChunks.map(chunk => chunk.chunk).join('\n\n');
+                    sources = [...new Set(relevantChunks.map(chunk => chunk.source))];
+                    
+                    console.log(`Found ${relevantChunks.length} relevant chunks from: ${sources.join(', ')}`);
+                    console.log('Content types:', [...new Set(relevantChunks.map(c => c.type))]);
+                }
+            }
+        }
+    }
+    
+    // Generate response with Azure OpenAI
+    return await generateAzureOpenAIResponse(message, context, sources);
+}
+
+// Generate response using Azure OpenAI
+async function generateAzureOpenAIResponse(message, context = '', sources = []) {
+    const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+    const apiKey = process.env.AZURE_OPENAI_KEY;
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const apiVersion = process.env.AZURE_OPENAI_VERSION;
+    
+    console.log('Checking Azure OpenAI configuration...');
+    console.log('Endpoint:', endpoint ? 'SET' : 'NOT SET');
+    console.log('API Key:', apiKey ? 'SET' : 'NOT SET');
+    console.log('Deployment:', deployment || 'NOT SET');
+    console.log('API Version:', apiVersion || 'NOT SET');
+    
+    if (!endpoint || !apiKey || !deployment) {
+        throw new Error('Azure OpenAI configuration incomplete. Missing: ' + 
+            [!endpoint && 'endpoint', !apiKey && 'apiKey', !deployment && 'deployment']
+            .filter(Boolean).join(', '));
+    }
+    
+    // Initialize Azure OpenAI client if not already done
+    if (!azureOpenAIClient) {
+        azureOpenAIClient = initializeAzureOpenAI();
+        if (!azureOpenAIClient) {
+            throw new Error('Failed to initialize Azure OpenAI client');
+        }
+    }
+    
+    try {
+        let systemMessage = "You are a helpful AI assistant. Provide accurate, helpful, and informative responses.";
+        let userMessage = message;
+        
+        // Add context if available
+        if (context) {
+            systemMessage += " Use the provided context to answer questions when relevant, but you can also use your general knowledge when appropriate.";
+            userMessage = `Context from documentation and website:
+${context}
+
+Question: ${message}
+
+Please provide a helpful and accurate answer based on the context above and your knowledge:`;
+        }
+        
+        // Determine if this is an o1 model
+        const isO1Model = deployment.toLowerCase().includes('o1');
+        
+        console.log(`Calling Azure OpenAI deployment: ${deployment}`);
+        console.log(`Model type: ${isO1Model ? 'o1-series' : 'standard'}`);
+        
+        let response;
+        
+        if (isO1Model) {
+            // o1 models have specific requirements:
+            // - No system messages (they're built into the model)
+            // - Use max_completion_tokens instead of max_tokens
+            // - Temperature and top_p are not supported
+            // - Only user messages are supported
+            
+            console.log('Using o1-specific parameters');
+            
+            response = await azureOpenAIClient.chat.completions.create({
+                messages: [{ role: "user", content: userMessage }],
+                max_completion_tokens: 2000  // o1 models use max_completion_tokens
+                // Note: o1 models don't support temperature, top_p, frequency_penalty, presence_penalty
+            });
+            
+        } else {
+            // Standard GPT models (gpt-3.5, gpt-4, etc.)
+            let maxTokens = 1000;
+            let temperature = 0.7;
+            
+            // Adjust parameters for different standard models
+            if (deployment.includes('gpt-4')) {
+                maxTokens = 1500;
+                temperature = 0.7;
+            } else if (deployment.includes('gpt-3.5')) {
+                maxTokens = 1000;
+                temperature = 0.7;
+            }
+            
+            console.log(`Using standard parameters - Max tokens: ${maxTokens}, Temperature: ${temperature}`);
+            
+            const messages = [
+                { role: "system", content: systemMessage },
+                { role: "user", content: userMessage }
+            ];
+            
+            response = await azureOpenAIClient.chat.completions.create({
+                messages: messages,
+                max_tokens: maxTokens,  // Standard models use max_tokens
+                temperature: temperature,
+                top_p: 0.9,
+                frequency_penalty: 0,
+                presence_penalty: 0
+            });
+        }
+        
+        console.log('Azure OpenAI response received');
+        
+        let aiResponse = response.choices[0]?.message?.content || "I couldn't generate a response.";
+        
+        // Add sources if available
+        if (sources.length > 0) {
+            aiResponse += `\n\n📚 **Sources:**\n${sources.map(s => `• ${s}`).join('\n')}`;
+        }
+        
+        console.log(`✅ Azure OpenAI response generated (${aiResponse.length} characters)`);
+        return aiResponse;
+        
+    } catch (error) {
+        console.error('❌ Azure OpenAI API error:', error);
+        
+        // Provide more specific error messages
+        if (error.status === 404) {
+            throw new Error(`Azure OpenAI deployment '${deployment}' not found. Please check your deployment name.`);
+        } else if (error.status === 401) {
+            throw new Error('Invalid Azure OpenAI API key. Please check your credentials.');
+        } else if (error.status === 429) {
+            throw new Error('Azure OpenAI quota exceeded. Please check your usage limits.');
+        } else if (error.status === 400) {
+            throw new Error(`Azure OpenAI parameter error: ${error.message}`);
+        } else {
+            throw new Error(`Azure OpenAI error: ${error.message}`);
+        }
+    }
+}
+
 // Chat API endpoint with RAG support
 app.post('/api/chat', async (req, res) => {
     const startTime = Date.now();
@@ -823,12 +1055,81 @@ app.post('/api/chat', async (req, res) => {
             }
         }
 
-        // Fall back to Azure OpenAI (you can add this later)
-        return res.status(501).json({
-            error: 'Azure OpenAI not implemented in this version',
-            details: 'Please enable local models or implement Azure OpenAI fallback'
-        });
-
+        // Use Azure OpenAI when local models are disabled
+        console.log('Using Azure OpenAI...');
+        
+        // Check Azure OpenAI configuration
+        const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+        const apiKey = process.env.AZURE_OPENAI_KEY;
+        const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+        
+        if (!endpoint || !apiKey || !deployment) {
+            return res.status(500).json({
+                error: 'Azure OpenAI not configured',
+                details: `Missing configuration: ${[
+                    !endpoint && 'AZURE_OPENAI_ENDPOINT',
+                    !apiKey && 'AZURE_OPENAI_KEY', 
+                    !deployment && 'AZURE_OPENAI_DEPLOYMENT'
+                ].filter(Boolean).join(', ')}`,
+                troubleshooting: 'Please check your environment variables in the .env file'
+            });
+        }
+        
+        // Auto-crawl website if no website content and includeWebsiteContent is true
+        if (includeWebsiteContent && useRAG) {
+            const websiteChunks = documentEmbeddings.filter(d => d.type === 'website');
+            if (websiteChunks.length === 0 && !websiteCrawlData.crawlInProgress) {
+                console.log('No website content found, triggering auto-crawl...');
+                crawlAndIndexWebsite().catch(error => {
+                    console.error('Auto-crawl failed:', error);
+                });
+            }
+        }
+        
+        // Initialize embedder for RAG if needed
+        if (useRAG && !embedder) {
+            await initializeEmbedder();
+        }
+        
+        try {
+            console.log('Generating response with Azure OpenAI and RAG...');
+            
+            const aiResponse = await generateAzureOpenAIResponseWithRAG(
+                message, 
+                useRAG,
+                includeWebsiteContent
+            );
+            const duration = Date.now() - startTime;
+            
+            console.log('SUCCESS: Azure OpenAI response generated');
+            console.log('Response length:', aiResponse.length);
+            console.log('Duration:', duration + 'ms');
+            console.log('=== CHAT API REQUEST END ===\n');
+            
+            return res.json({
+                response: aiResponse,
+                metadata: {
+                    duration: duration,
+                    model: deployment,
+                    modelType: 'azure-openai',
+                    timestamp: new Date().toISOString(),
+                    source: 'azure-cloud',
+                    ragEnabled: useRAG,
+                    websiteContentIncluded: includeWebsiteContent,
+                    documentsCount: documentStore.length,
+                    websitePagesCount: documentEmbeddings.filter(d => d.type === 'website').length,
+                    endpoint: endpoint?.split('.')[0] + '...' // Partially masked endpoint
+                }
+            });
+            
+        } catch (error) {
+            console.error('Error with Azure OpenAI:', error);
+            return res.status(500).json({
+                error: 'Azure OpenAI request failed',
+                details: error.message,
+                troubleshooting: 'Check your Azure OpenAI configuration and quota'
+            });
+        }
     } catch (error) {
         const duration = Date.now() - startTime;
         console.log('\n!!! CHAT API EXCEPTION !!!');
@@ -1003,6 +1304,8 @@ app.get('/api/health', (req, res) => {
     const config = {
         useLocalModel: process.env.USE_LOCAL_MODEL === 'true',
         localModelName: process.env.LOCAL_MODEL_NAME || 'distilgpt2',
+        azureOpenAIConfigured: !!(process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY),
+        azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'not set',
         nodeVersion: process.version,
         platform: process.platform
     };
@@ -1015,7 +1318,8 @@ app.get('/api/health', (req, res) => {
             localModel: !!localModel,
             modelLoading,
             modelError,
-            embedder: !!embedder
+            embedder: !!embedder,
+            azureOpenAI: !!azureOpenAIClient
         },
         rag: {
             documents: documentStore.length,
@@ -1038,6 +1342,30 @@ app.get('/api/debug/env', (req, res) => {
     };
     
     res.json(debugInfo);
+});
+
+// Add this debug endpoint to check Azure OpenAI configuration
+app.get('/api/debug/azure-config', (req, res) => {
+    res.json({
+        endpoint: process.env.AZURE_OPENAI_ENDPOINT ? 'SET' : 'NOT SET',
+        endpointValue: process.env.AZURE_OPENAI_ENDPOINT ? process.env.AZURE_OPENAI_ENDPOINT.substring(0, 30) + '...' : 'undefined',
+        key: process.env.AZURE_OPENAI_KEY ? 'SET (length: ' + process.env.AZURE_OPENAI_KEY.length + ')' : 'NOT SET',
+        deployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'NOT SET',
+        version: process.env.AZURE_OPENAI_VERSION || 'NOT SET',
+        useLocalModel: process.env.USE_LOCAL_MODEL,
+        allEnvKeys: Object.keys(process.env).filter(key => key.includes('AZURE')).sort(),
+        configStatus: {
+            hasEndpoint: !!process.env.AZURE_OPENAI_ENDPOINT,
+            hasKey: !!process.env.AZURE_OPENAI_KEY,
+            hasDeployment: !!process.env.AZURE_OPENAI_DEPLOYMENT,
+            hasVersion: !!process.env.AZURE_OPENAI_VERSION,
+            allConfigured: !!(process.env.AZURE_OPENAI_ENDPOINT && 
+                             process.env.AZURE_OPENAI_KEY && 
+                             process.env.AZURE_OPENAI_DEPLOYMENT && 
+                             process.env.AZURE_OPENAI_VERSION)
+        },
+        timestamp: new Date().toISOString()
+    });
 });
 
 // Model management endpoints
@@ -1118,6 +1446,87 @@ app.post('/api/model/test-download', async (req, res) => {
             error: 'Model download test failed',
             modelName: testModel,
             details: error.message
+        });
+    }
+});
+
+// Test Azure OpenAI connection
+app.post('/api/azure-openai/test', async (req, res) => {
+    try {
+        console.log('Testing Azure OpenAI connection...');
+        
+        const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+        const apiKey = process.env.AZURE_OPENAI_KEY;
+        const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+        
+        if (!endpoint || !apiKey || !deployment) {
+            return res.status(500).json({
+                success: false,
+                error: 'Azure OpenAI not configured',
+                details: 'Missing credentials or configuration',
+                missing: [
+                    !endpoint && 'AZURE_OPENAI_ENDPOINT',
+                    !apiKey && 'AZURE_OPENAI_KEY',
+                    !deployment && 'AZURE_OPENAI_DEPLOYMENT'
+                ].filter(Boolean)
+            });
+        }
+        
+        // Initialize client if needed
+        if (!azureOpenAIClient) {
+            azureOpenAIClient = initializeAzureOpenAI();
+            if (!azureOpenAIClient) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to initialize Azure OpenAI client',
+                    details: 'Client initialization failed'
+                });
+            }
+        }
+        
+        const testMessage = req.body.message || "Hello, this is a test message. Please respond briefly.";
+        const isO1Model = deployment.toLowerCase().includes('o1');
+        
+        console.log(`Testing ${isO1Model ? 'o1-series' : 'standard'} model: ${deployment}`);
+        
+        let result;
+        
+        if (isO1Model) {
+            // o1 models use different parameters
+            result = await azureOpenAIClient.chat.completions.create({
+                messages: [{ role: "user", content: testMessage }],
+                max_completion_tokens: 100  // o1 models use max_completion_tokens
+            });
+        } else {
+            // Standard models
+            result = await azureOpenAIClient.chat.completions.create({
+                messages: [{ role: "user", content: testMessage }],
+                max_tokens: 50,  // Standard models use max_tokens
+                temperature: 0.7
+            });
+        }
+        
+        const response = result.choices[0]?.message?.content || "No response";
+        
+        res.json({
+            success: true,
+            message: 'Azure OpenAI connection successful',
+            deployment: deployment,
+            modelType: isO1Model ? 'o1-series' : 'standard',
+            testResponse: response,
+            timestamp: new Date().toISOString(),
+            usage: result.usage || null
+        });
+        
+    } catch (error) {
+        console.error('Azure OpenAI test failed:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Azure OpenAI test failed',
+            details: error.message,
+            deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+            statusCode: error.status || 'unknown',
+            errorCode: error.code || 'unknown'
         });
     }
 });
