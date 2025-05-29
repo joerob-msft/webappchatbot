@@ -1,16 +1,22 @@
 {
   "name": "webappchatbot",
   "version": "1.0.0",
-  "description": "Azure OpenAI chatbot with local model support",
+  "description": "Azure OpenAI chatbot with local model support and RAG",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
     "@xenova/transformers": "^2.6.0",
-    "dotenv": "^16.0.3"
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "mammoth": "^1.6.0",
+    "multer": "^2.0.0",
+    "pdf-parse": "^1.1.1",
+    "robots-parser": "^3.0.1"
   },
   "engines": {
     "node": ">=18.0.0"

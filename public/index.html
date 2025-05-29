@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Azure OpenAI Chatbot - Debug Mode</title>
+    <title>AI Chatbot - Local Models & Azure OpenAI</title>
+    <meta name="description" content="Intelligent chatbot powered by local AI models and Azure OpenAI with RAG capabilities">
     <style>
         .chat-container {
             max-width: 700px;
@@ -142,6 +143,65 @@
             border: 1px solid #ffeaa7;
             color: #856404;
         }
+        
+        .knowledge-base {
+            background: #e8f5e8;
+            border: 2px solid #4caf50;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 8px;
+        }
+        
+        .knowledge-base h3 {
+            margin-top: 0;
+            color: #2e7d32;
+        }
+        
+        .knowledge-links {
+            display: flex;
+            gap: 1rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        
+        .knowledge-links a {
+            background: #4caf50;
+            color: white;
+            padding: 0.5rem 1rem;
+            text-decoration: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        .knowledge-links a:hover {
+            background: #45a049;
+        }
+        
+        .admin-link {
+            background: #2196F3 !important;
+        }
+        
+        .admin-link:hover {
+            background: #1976D2 !important;
+        }
+        
+        .navigation {
+            background: #333;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 2rem;
+        }
+        
+        .navigation a {
+            color: white;
+            text-decoration: none;
+            margin-right: 2rem;
+            font-weight: bold;
+        }
+        
+        .navigation a:hover {
+            color: #667eea;
+        }
     </style>
 </head>
 <body>
@@ -169,6 +229,17 @@
             <input type="text" id="userInput" placeholder="Type your message here..." 
                    onkeypress="handleKeyPress(event)">
             <button id="sendBtn" class="btn btn-primary" onclick="sendMessage()">Send</button>
+        </div>
+        
+        <div class="knowledge-base">
+            <h3>📚 Knowledge Base & Administration</h3>
+            <p>Our AI chatbot has access to comprehensive information on various topics. Try asking questions about:</p>
+            <div class="knowledge-links">
+                <a href="/dogs-qa.html" target="_blank">🐕 Dogs & Breeds Guide</a>
+                <a href="/admin.html" class="admin-link">⚙️ Admin Panel</a>
+                <a href="/api/health" target="_blank" class="admin-link">🏥 System Health</a>
+            </div>
+            <p><small>💡 Tip: The chatbot can answer questions based on the content from these pages! Use the admin panel to manage crawling and models.</small></p>
         </div>
     </div>
 

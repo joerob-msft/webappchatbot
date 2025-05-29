@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chatbot Admin - Website Crawling</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        
+        .button {
+            background: #4CAF50;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        
+        .button:hover {
+            background: #45a049;
+        }
+        
+        .button.secondary {
+            background: #2196F3;
+        }
+        
+        .button.secondary:hover {
+            background: #1976D2;
+        }
+        
+        .button.danger {
+            background: #f44336;
+        }
+        
+        .button.danger:hover {
+            background: #d32f2f;
+        }
+        
+        .status-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        
+        .success {
+            background: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+        
+        .error {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+            color: #721c24;
+        }
+        
+        .loading {
+            background: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        
+        .navigation {
+            background: #333;
+            padding: 1rem;
+            border-radius: 5px;
+            margin-bottom: 2rem;
+        }
+        
+        .navigation a {
+            color: white;
+            text-decoration: none;
+            margin-right: 2rem;
+            font-weight: bold;
+        }
+        
+        .navigation a:hover {
+            color: #667eea;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navigation">
+        <a href="/">🏠 Chat Interface</a>
+        <a href="/dogs-qa.html">🐕 Knowledge Base</a>
+        <a href="/admin.html">⚙️ Admin Panel</a>
+    </nav>
+
+    <header class="header">
+        <h1>🤖 Chatbot Administration</h1>
+        <p>Website Crawling & Content Management</p>
+    </header>
+
+    <div class="container">
+        <h2>🌐 Website Crawling</h2>
+        
+        <div class="grid">
+            <div>
+                <h3>Quick Actions</h3>
+                <button class="button" onclick="startAutoCrawl()">🚀 Start Auto-Crawl</button>
+                <button class="button secondary" onclick="checkStatus()">📊 Check Status</button>
+                <button class="button secondary" onclick="checkHealth()">🏥 Health Check</button>
+                <br><br>
+                
+                <h4>Custom Crawl</h4>
+                <input type="url" id="customUrl" placeholder="https://example.com" style="width: 100%; padding: 8px; margin: 5px 0;">
+                <br>
+                <label>Max Pages: <input type="number" id="maxPages" value="20" min="1" max="100" style="width: 80px; padding: 4px;"></label>
+                <br>
+                <label><input type="checkbox" id="respectRobots" checked> Respect robots.txt</label>
+                <br>
+                <button class="button" onclick="startCustomCrawl()">🔍 Crawl Website</button>
+            </div>
+            
+            <div>
+                <h3>System Status</h3>
+                <div id="statusDisplay" class="status-box">
+                    Click "Check Status" to view current system status
+                </div>
+                
+                <h4>Quick Links</h4>
+                <a href="/api/health" target="_blank" class="button secondary">API Health Check</a>
+                <a href="/api/website/status" target="_blank" class="button secondary">Crawl Status API</a>
+                <a href="/api/model/status" target="_blank" class="button secondary">Model Status API</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>📊 System Information</h2>
+        <div id="systemInfo" class="status-box">
+            <em>Loading system information...</em>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>🔧 Model Management</h2>
+        <div class="grid">
+            <div>
+                <h3>Model Controls</h3>
+                <select id="modelSelect" style="width: 100%; padding: 8px; margin: 10px 0;">
+                    <option value="distilgpt2">DistilGPT-2 (Recommended)</option>
+                    <option value="gpt2">GPT-2 (Better Quality)</option>
+                    <option value="flan-t5-small">FLAN-T5-Small (Instructions)</option>
+                    <option value="distilbert-sentiment">DistilBERT (Sentiment)</option>
+                </select>
+                <button class="button" onclick="switchModel()">🔄 Switch Model</button>
+                <button class="button secondary" onclick="checkModelStatus()">📋 Model Status</button>
+            </div>
+            
+            <div>
+                <h3>Model Information</h3>
+                <div id="modelInfo" class="status-box">
+                    Click "Model Status" to view current model information
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>💬 Test Chat</h2>
+        <div style="margin: 20px 0;">
+            <textarea id="testMessage" placeholder="Ask a question to test the chatbot..." style="width: 100%; height: 100px; padding: 10px; border-radius: 5px; border: 1px solid #ddd;"></textarea>
+            <br>
+            <label><input type="checkbox" id="useRAG" checked> Use RAG (Document Context)</label>
+            <label><input type="checkbox" id="includeWebsite" checked> Include Website Content</label>
+            <br>
+            <button class="button" onclick="testChat()">💬 Send Test Message</button>
+        </div>
+        <div id="chatResponse" class="status-box" style="display: none;">
+            <h4>Response:</h4>
+            <div id="chatResponseText"></div>
+        </div>
+    </div>
+
+    <script>
+        // Auto-load system info on page load
+        window.addEventListener('load', function() {
+            checkHealth();
+            checkModelStatus();
+        });
+
+        async function startAutoCrawl() {
+            try {
+                updateStatus('Starting auto-crawl...', 'loading');
+                
+                const response = await fetch('/api/website/auto-crawl', {
+                    method: 'GET'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateStatus(`✅ ${result.message}<br>Base URL: ${result.baseUrl}<br><em>Check status in a few seconds...</em>`, 'success');
+                    setTimeout(checkStatus, 3000);
+                } else {
+                    updateStatus(`⚠️ ${result.message}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function startCustomCrawl() {
+            const url = document.getElementById('customUrl').value;
+            const maxPages = parseInt(document.getElementById('maxPages').value);
+            const respectRobots = document.getElementById('respectRobots').checked;
+            
+            if (!url) {
+                updateStatus('❌ Please enter a URL to crawl', 'error');
+                return;
+            }
+            
+            try {
+                updateStatus('Starting custom crawl...', 'loading');
+                
+                const response = await fetch('/api/website/crawl', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        baseUrl: url,
+                        maxPages: maxPages,
+                        respectRobots: respectRobots,
+                        crawlDelay: 1000
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateStatus(`✅ ${result.message}<br>URL: ${result.baseUrl}<br>Max Pages: ${maxPages}`, 'success');
+                    setTimeout(checkStatus, 3000);
+                } else {
+                    updateStatus(`❌ ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                const response = await fetch('/api/website/status');
+                const status = await response.json();
+                
+                let statusHtml = `
+                    <h4>📊 Crawl Status</h4>
+                    <strong>In Progress:</strong> ${status.crawl.crawlInProgress ? 'Yes' : 'No'}<br>
+                    <strong>Last Crawl:</strong> ${status.crawl.lastCrawl || 'Never'}<br>
+                    <strong>Pages Crawled:</strong> ${status.crawl.crawledPages}<br>
+                    <strong>Errors:</strong> ${status.crawl.errors.length}<br>
+                    <br>
+                    <h4>📚 Content Stats</h4>
+                    <strong>Website Pages:</strong> ${status.websiteContent.pages}<br>
+                    <strong>Content Chunks:</strong> ${status.websiteContent.chunks}
+                `;
+                
+                if (status.crawl.errors.length > 0) {
+                    statusHtml += `<br><h4>❌ Recent Errors</h4>`;
+                    status.crawl.errors.slice(0, 3).forEach(error => {
+                        statusHtml += `<small>${error.url}: ${error.error}</small><br>`;
+                    });
+                }
+                
+                updateStatus(statusHtml, status.crawl.crawlInProgress ? 'loading' : 'success');
+                
+            } catch (error) {
+                updateStatus(`❌ Error checking status: ${error.message}`, 'error');
+            }
+        }
+
+        async function checkHealth() {
+            try {
+                const response = await fetch('/api/health');
+                const health = await response.json();
+                
+                const healthHtml = `
+                    <h4>🏥 System Health</h4>
+                    <strong>Status:</strong> ${health.status}<br>
+                    <strong>Local Model:</strong> ${health.models.localModel ? '✅ Loaded' : '❌ Not Loaded'}<br>
+                    <strong>Embedder:</strong> ${health.models.embedder ? '✅ Ready' : '❌ Not Ready'}<br>
+                    <strong>Documents:</strong> ${health.rag.documents}<br>
+                    <strong>Chunks:</strong> ${health.rag.chunks}<br>
+                    <strong>Website Pages:</strong> ${health.rag.websitePages}<br>
+                    <strong>Timestamp:</strong> ${new Date(health.timestamp).toLocaleString()}
+                `;
+                
+                document.getElementById('systemInfo').innerHTML = healthHtml;
+                document.getElementById('systemInfo').className = 'status-box success';
+                
+            } catch (error) {
+                document.getElementById('systemInfo').innerHTML = `❌ Error: ${error.message}`;
+                document.getElementById('systemInfo').className = 'status-box error';
+            }
+        }
+
+        async function checkModelStatus() {
+            try {
+                const response = await fetch('/api/model/status');
+                const status = await response.json();
+                
+                const modelHtml = `
+                    <h4>🤖 Model Status</h4>
+                    <strong>Model:</strong> ${status.model.name}<br>
+                    <strong>Loaded:</strong> ${status.model.loaded ? '✅ Yes' : '❌ No'}<br>
+                    <strong>Loading:</strong> ${status.model.loading ? '⏳ Yes' : 'No'}<br>
+                    <strong>Error:</strong> ${status.model.error || 'None'}<br>
+                    <strong>Embedder:</strong> ${status.embedder.status}<br>
+                    <strong>Memory Usage:</strong> ${Math.round(status.memory.heapUsed / 1024 / 1024)} MB
+                `;
+                
+                document.getElementById('modelInfo').innerHTML = modelHtml;
+                document.getElementById('modelInfo').className = status.model.loaded ? 'status-box success' : 'status-box error';
+                
+            } catch (error) {
+                document.getElementById('modelInfo').innerHTML = `❌ Error: ${error.message}`;
+                document.getElementById('modelInfo').className = 'status-box error';
+            }
+        }
+
+        async function switchModel() {
+            const modelName = document.getElementById('modelSelect').value;
+            
+            try {
+                updateStatus(`Switching to ${modelName}...`, 'loading');
+                
+                const response = await fetch('/api/model/initialize', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ modelName: modelName })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateStatus(`✅ ${result.message}`, 'success');
+                    setTimeout(checkModelStatus, 2000);
+                } else {
+                    updateStatus(`❌ ${result.error}`, 'error');
+                }
+            } catch (error) {
+                updateStatus(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function testChat() {
+            const message = document.getElementById('testMessage').value;
+            const useRAG = document.getElementById('useRAG').checked;
+            const includeWebsite = document.getElementById('includeWebsite').checked;
+            
+            if (!message.trim()) {
+                alert('Please enter a test message');
+                return;
+            }
+            
+            try {
+                document.getElementById('chatResponse').style.display = 'block';
+                document.getElementById('chatResponseText').innerHTML = '⏳ Generating response...';
+                
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: message,
+                        useRAG: useRAG,
+                        includeWebsiteContent: includeWebsite
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.response) {
+                    let responseHtml = `
+                        <div style="background: #f8f9fa; padding: 10px; border-radius: 5px; margin: 10px 0;">
+                            <strong>Response:</strong><br>
+                            ${result.response.replace(/\n/g, '<br>')}
+                        </div>
+                    `;
+                    
+                    if (result.metadata) {
+                        responseHtml += `
+                            <small>
+                                <strong>Model:</strong> ${result.metadata.model} | 
+                                <strong>Duration:</strong> ${result.metadata.duration}ms | 
+                                <strong>RAG:</strong> ${result.metadata.ragEnabled ? 'Enabled' : 'Disabled'} | 
+                                <strong>Documents:</strong> ${result.metadata.documentsCount}
+                            </small>
+                        `;
+                    }
+                    
+                    document.getElementById('chatResponseText').innerHTML = responseHtml;
+                } else {
+                    document.getElementById('chatResponseText').innerHTML = `❌ Error: ${result.error}`;
+                }
+                
+            } catch (error) {
+                document.getElementById('chatResponseText').innerHTML = `❌ Error: ${error.message}`;
+            }
+        }
+
+        function updateStatus(message, type = 'success') {
+            const statusDiv = document.getElementById('statusDisplay');
+            statusDiv.innerHTML = message;
+            statusDiv.className = `status-box ${type}`;
+        }
+    </script>
+</body>
+</html>

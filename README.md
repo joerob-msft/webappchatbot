@@ -1,186 +1,137 @@
-# Azure OpenAI Web App Chatbot with Local Model Support
+# Advanced AI Chatbot with RAG, Local Models & Azure OpenAI
 
-A flexible web-based chatbot that supports both Azure OpenAI Service and local AI models, built with Node.js and Express. This application can run entirely locally using Transformers.js or connect to Azure OpenAI for cloud-based inference.
+A powerful web-based chatbot that supports both Azure OpenAI Service and local AI models, featuring RAG (Retrieval-Augmented Generation), website crawling, document upload, and intelligent content indexing. Built with Node.js and Express.
 
-## Features
+## 🚀 Features
 
+### Core AI Capabilities
 - **Dual Mode Support**: Run local models or use Azure OpenAI Service
 - **Local Model Inference**: Server-side AI models using Transformers.js
 - **Multi-Model Support**: Works with GPT-3.5, GPT-4, o1-series, and various local models
 - **Model-Aware Configuration**: Automatically adjusts parameters based on the selected model
-- **Debug Mode**: Built-in debugging interface for troubleshooting
-- **Azure Deployment Ready**: Configured for Azure Web Apps with GitHub Actions CI/CD
-- **Health Monitoring**: Health check endpoints for monitoring application status
-- **Memory Monitoring**: Track resource usage for local models
 
-## Prerequisites
+### RAG (Retrieval-Augmented Generation)
+- **Document Upload**: Support for .txt, .pdf, .docx, and .md files
+- **Website Crawling**: Automatically crawl and index website content
+- **Intelligent Chunking**: Smart text segmentation with overlap for better context
+- **Semantic Search**: Vector embeddings for relevant document retrieval
+- **Source Attribution**: Responses include source references
+
+### Advanced Features
+- **Auto Website Indexing**: Automatically crawls your website for content
+- **Document Processing**: Extract text from various file formats
+- **Content Management**: Manage uploaded documents and crawled content
+- **Debug Mode**: Built-in debugging interface for troubleshooting
+- **Health Monitoring**: Comprehensive health check and monitoring endpoints
+- **Memory Tracking**: Monitor resource usage for local models
+
+### Deployment Ready
+- **Azure Deployment**: Configured for Azure Web Apps with GitHub Actions CI/CD
+- **Environment Management**: Flexible configuration for different environments
+- **Scalable Architecture**: Designed to handle multiple users and documents
+
+## 📋 Prerequisites
 
 ### Local Development
 - **Node.js**: Version 18.0.0 or higher (required for Transformers.js)
 - **npm**: Comes with Node.js
 - **Git**: For version control
-- **Memory**: At least 2GB RAM for local models (4GB+ recommended)
+- **Memory**: At least 2GB RAM for local models (4GB+ recommended for RAG)
+- **Storage**: Additional space for uploaded documents and model cache
 
 ### Azure Resources (Optional for Cloud Mode)
 - **Azure Subscription**: Active Azure subscription
 - **Azure OpenAI Service**: Deployed Azure OpenAI resource
 - **Model Deployment**: At least one model deployed (GPT-3.5, GPT-4, or o1-series)
 
-## Environment Variables
+## ⚙️ Environment Configuration
 
-### For Local Model Mode
+### Complete .env Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root with these settings:
 
 ```env
-# Local Model Configuration
+# =====================================
+# LOCAL MODEL CONFIGURATION
+# =====================================
 USE_LOCAL_MODEL=true
 LOCAL_MODEL_NAME=distilgpt2
 
-# Azure OpenAI (kept for fallback when USE_LOCAL_MODEL=false)
+# =====================================
+# RAG CONFIGURATION
+# =====================================
+RAG_CHUNK_SIZE=500
+RAG_CHUNK_OVERLAP=50
+RAG_TOP_K=3
+
+# =====================================
+# WEBSITE CRAWLING CONFIGURATION
+# =====================================
+WEBSITE_AUTO_CRAWL=true
+WEBSITE_MAX_PAGES=50
+WEBSITE_CRAWL_DELAY=1000
+
+# =====================================
+# AZURE OPENAI (Fallback Configuration)
+# =====================================
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
 AZURE_OPENAI_KEY=your-api-key-here
 AZURE_OPENAI_DEPLOYMENT=your-deployment-name
 AZURE_OPENAI_VERSION=2024-08-01-preview
 
-# Server Configuration (optional)
+# =====================================
+# SERVER CONFIGURATION
+# =====================================
 PORT=3000
 NODE_ENV=development
 ```
 
-### For Azure OpenAI Mode
+### Configuration Options Explained
 
-```env
-# Azure OpenAI Configuration
-USE_LOCAL_MODEL=false
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_KEY=your-api-key-here
-AZURE_OPENAI_DEPLOYMENT=your-deployment-name
-AZURE_OPENAI_VERSION=2024-08-01-preview
-PORT=3000
-```
+| Setting | Description | Default | Options |
+|---------|-------------|---------|---------|
+| `USE_LOCAL_MODEL` | Enable local model mode | `true` | `true`, `false` |
+| `LOCAL_MODEL_NAME` | Local model to use | `distilgpt2` | See model list below |
+| `RAG_CHUNK_SIZE` | Text chunk size for RAG | `500` | 200-1000 words |
+| `RAG_CHUNK_OVERLAP` | Overlap between chunks | `50` | 0-100 words |
+| `RAG_TOP_K` | Number of relevant chunks to retrieve | `3` | 1-10 |
+| `WEBSITE_AUTO_CRAWL` | Auto-crawl website on startup | `true` | `true`, `false` |
+| `WEBSITE_MAX_PAGES` | Maximum pages to crawl | `50` | 1-200 |
+| `WEBSITE_CRAWL_DELAY` | Delay between page crawls (ms) | `1000` | 500-5000 |
 
-## Local Model Support
+## 🤖 Supported Local Models
 
-### Available Local Models (Transformers.js)
+### Recommended Models by Use Case
 
-| Model Name | Provider | Task | Size | Memory Usage | Best For |
-|------------|----------|------|------|--------------|----------|
-| `distilgpt2` | Hugging Face | Text Generation | ~82MB | ~250MB RAM | **Recommended**: Fast responses, testing |
-| `gpt2` | OpenAI/Hugging Face | Text Generation | ~500MB | ~700MB RAM | Better quality responses |
-| `distilbert-sentiment` | Hugging Face | Sentiment Analysis | ~250MB | ~400MB RAM | Sentiment + conversation |
-| `bert-qa` | Google/Hugging Face | Question Answering | ~250MB | ~400MB RAM | Specific Q&A scenarios |
-| `flan-t5-small` | Google | Instruction Following | ~300MB | ~450MB RAM | Following instructions |
+| Use Case | Primary Model | Alternative | Memory | Best For |
+|----------|---------------|-------------|---------|----------|
+| **Getting Started** | `distilgpt2` | `gpt2` | ~250MB | Fast setup, testing |
+| **General Chat** | `distilgpt2` | `gpt2` | ~250MB | Balanced speed/quality |
+| **Better Quality** | `gpt2` | `flan-t5-small` | ~700MB | Higher quality responses |
+| **Instructions** | `flan-t5-small` | `gpt2` | ~450MB | Following commands |
+| **RAG + Documents** | `distilgpt2` | `gpt2` | ~250MB+ | With document context |
+| **Production** | `gpt2` | `flan-t5-small` | ~700MB | Best local quality |
 
-### Model Recommendations by Use Case
+### Available Models with Details
 
-| Use Case | Recommended Model | Alternative | Why | Notes |
-|----------|-------------------|-------------|-----|-------|
-| **Getting Started** | `distilgpt2` | `gpt2` | Fastest setup, lowest memory | Best for first-time users |
-| **General Conversation** | `distilgpt2` | `gpt2` | Good balance of speed/quality | Most reliable for chat |
-| **Better Quality Chat** | `gpt2` | `flan-t5-small` | Higher quality responses | Requires more memory |
-| **Instruction Following** | `flan-t5-small` | `gpt2` | Better at following commands | Good for specific tasks |
-| **Sentiment Analysis** | `distilbert-sentiment` | `distilgpt2` | Analyzes emotions + responds | Specialized use case |
-| **Question Answering** | `distilgpt2` | `flan-t5-small` | **Note: bert-qa has limitations** | Use text generation instead |
-| **Development/Testing** | `distilgpt2` | Any | Fast loading, low resource usage | Quickest iteration |
-| **Production (Local)** | `gpt2` | `flan-t5-small` | Best quality for local models | Most reliable |
+| Model Name | Provider | Task | Download Size | Memory Usage | Quality |
+|------------|----------|------|---------------|--------------|---------|
+| `distilgpt2` | Hugging Face/OpenAI | Text Generation | ~82MB | ~250MB | ⭐⭐⭐ |
+| `gpt2` | OpenAI | Text Generation | ~500MB | ~700MB | ⭐⭐⭐⭐ |
+| `flan-t5-small` | Google | Instruction Following | ~300MB | ~450MB | ⭐⭐⭐⭐ |
+| `distilbert-sentiment` | Hugging Face | Sentiment + Chat | ~250MB | ~400MB | ⭐⭐⭐ |
 
-### Important Notes for Q&A Models
+### Memory Requirements by Azure Plan
 
-⚠️ **bert-qa Model Limitations**: The `bert-qa` model is designed for extractive question answering with specific contexts. It works best when:
-- Asking direct, factual questions
-- The answer exists within the provided context
-- Questions are well-formed and specific
-
-For general conversation, use `distilgpt2` or `gpt2` instead.
-
-### Memory and Performance Guidelines
-
-| Azure Plan | RAM Available | Recommended Models | Performance |
+| Azure Plan | Available RAM | Recommended Models | RAG Support |
 |------------|---------------|-------------------|-------------|
-| **Free F1** | 1GB | `distilgpt2` only | Limited, testing only |
-| **Basic B1** | 1.75GB | `distilgpt2`, `bert-qa` | Good for development |
-| **Standard S1** | 1.75GB | `distilgpt2`, `distilbert-sentiment` | Production ready |
-| **Standard S2** | 3.5GB | `gpt2`, `flan-t5-small` | Better quality |
-| **Premium P1V2** | 7GB | Any model | Best performance |
-| **Premium P2V2+** | 14GB+ | Multiple models | Can run several models |
+| **Free F1** | 1GB | `distilgpt2` only | Limited |
+| **Basic B1** | 1.75GB | `distilgpt2` | ✅ Good |
+| **Standard S1** | 1.75GB | `distilgpt2`, `bert-qa` | ✅ Good |
+| **Standard S2** | 3.5GB | `gpt2`, `flan-t5-small` | ✅ Excellent |
+| **Premium P1V2+** | 7GB+ | All models | ✅ Full Features |
 
-### Local Model Features
-
-- **Server-side inference**: Models run on your web server, not in the browser
-- **No external API calls**: Complete privacy and offline capability
-- **Automatic model downloading**: Models are downloaded on first use
-- **Fallback support**: Automatically falls back to Azure OpenAI if local models fail
-- **Memory monitoring**: Built-in endpoints to monitor resource usage
-
-## Open Source Models from Major Providers
-
-### Currently Supported via Transformers.js
-
-| Provider | Models Available | Examples |
-|----------|------------------|----------|
-| **OpenAI** | GPT-2 family | `gpt2`, `distilgpt2` |
-| **Google** | T5, BERT family | `flan-t5-small`, `bert-qa`, `distilbert-*` |
-| **Meta/Facebook** | BART, DeBERTa | `facebook/bart-large-cnn` |
-| **Microsoft** | DialoGPT, DeBERTa | `microsoft/DialoGPT-small` |
-| **Hugging Face** | Various optimized | `distilbert-*`, `distilgpt2` |
-
-### Additional Models You Can Try
-
-#### Text Generation Models
-```env
-# Microsoft DialoGPT (conversational)
-LOCAL_MODEL_NAME=microsoft/DialoGPT-small
-
-# Google T5 (instruction following)
-LOCAL_MODEL_NAME=google/flan-t5-base
-
-# Facebook BART (summarization + generation)
-LOCAL_MODEL_NAME=facebook/bart-large
-```
-
-#### Specialized Models
-```env
-# Sentiment Analysis
-LOCAL_MODEL_NAME=cardiffnlp/twitter-roberta-base-sentiment-latest
-
-# Question Answering
-LOCAL_MODEL_NAME=deepset/roberta-base-squad2
-
-# Summarization
-LOCAL_MODEL_NAME=facebook/bart-large-cnn
-
-# Code Generation
-LOCAL_MODEL_NAME=microsoft/CodeBERT-base
-```
-
-### Limitations and Future Support
-
-**Current Limitations:**
-- **Large Models**: Llama 2/3, Claude, GPT-3.5+ are too large for Transformers.js in web apps
-- **Newer Models**: Many newer models require GPU acceleration or specialized runtimes
-- **Memory Constraints**: Azure Web Apps limit model size to ~1-2GB effectively
-
-**Alternative Approaches for Larger Models:**
-1. **Ollama Integration** (for local development):
-   ```env
-   # Set up Ollama locally, then use:
-   USE_OLLAMA=true
-   OLLAMA_MODEL=llama2
-   OLLAMA_ENDPOINT=http://localhost:11434
-   ```
-
-2. **External Model APIs**:
-   - Hugging Face Inference API
-   - Replicate API
-   - Together AI
-   - Groq API
-
-3. **Quantized Models** (smaller versions):
-   - GGML/GGUF format models
-   - 4-bit/8-bit quantized versions
-
-## Local Development Setup
+## 🛠️ Local Development Setup
 
 ### 1. Clone the Repository
 ```bash
@@ -194,22 +145,14 @@ npm install
 ```
 
 ### 3. Configure Environment
+Create your `.env` file (see configuration section above).
 
-#### Option A: Local Models (Recommended for Development)
-Create a `.env` file:
+**Quick Start Configuration:**
 ```env
+# Minimal setup for local development
 USE_LOCAL_MODEL=true
 LOCAL_MODEL_NAME=distilgpt2
 PORT=3000
-```
-
-#### Option B: Azure OpenAI
-Create a `.env` file:
-```env
-USE_LOCAL_MODEL=false
-AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
-AZURE_OPENAI_KEY=your-api-key-here
-AZURE_OPENAI_DEPLOYMENT=your-deployment-name
 ```
 
 ### 4. Start the Application
@@ -217,70 +160,153 @@ AZURE_OPENAI_DEPLOYMENT=your-deployment-name
 npm start
 ```
 
-### 5. Initialize Local Model (if using local mode)
-The model will automatically initialize on first chat, or you can manually initialize:
-
-```bash
-# Using curl
-curl -X POST http://localhost:3000/api/model/initialize
-
-# Or visit the health check page and use the initialize button
-```
-
-### 6. Access the Application
-- **Main Interface**: http://localhost:3000
+### 5. Access the Application
+- **Main Chat Interface**: http://localhost:3000
+- **Knowledge Base**: http://localhost:3000/dogs-qa.html
 - **Health Check**: http://localhost:3000/api/health
 - **Model Status**: http://localhost:3000/api/model/status
-- **Memory Usage**: http://localhost:3000/api/system/memory
-- **Debug Info**: http://localhost:3000/api/debug/env
+- **Website Crawl Status**: http://localhost:3000/api/website/status
+- **Debug Environment**: http://localhost:3000/api/debug/env
 
-## Model Selection Guide
+### 6. Initialize RAG (Optional)
+The system will automatically:
+- Download and initialize the local model on first use
+- Initialize the embedder for RAG functionality
+- Auto-crawl your website if `WEBSITE_AUTO_CRAWL=true`
 
-### For Beginners
-1. **Start with**: `distilgpt2`
-2. **Why**: Fastest download, lowest memory, good for testing
-3. **Upgrade to**: `gpt2` when you need better quality
+## 📚 RAG (Retrieval-Augmented Generation) Features
 
-### For Development
-1. **Use**: `distilgpt2` or `flan-t5-small`
-2. **Why**: Fast iteration, good for testing features
-3. **Test with**: Multiple models to ensure compatibility
+### Document Upload
+Upload documents to enhance the chatbot's knowledge:
 
-### For Production
-1. **Local**: `gpt2` or `flan-t5-small` (if sufficient memory)
-2. **Cloud**: Azure OpenAI for best quality
-3. **Hybrid**: Local for development, Azure for production
+```bash
+# Upload a document via API
+curl -X POST http://localhost:3000/api/upload \
+  -F "file=@document.pdf" \
+  -F "description=Company policies"
+```
 
-### For Specific Tasks
-1. **General Chat**: `distilgpt2` → `gpt2`
-2. **Instructions**: `flan-t5-small`
-3. **Q&A**: `bert-qa` (with proper context)
-4. **Sentiment**: `distilbert-sentiment`
-5. **Code**: Consider external APIs for better code models
+**Supported Formats:**
+- `.txt` - Plain text files
+- `.pdf` - PDF documents
+- `.docx` - Microsoft Word documents
+- `.md` - Markdown files
 
-## Azure Web App Deployment
+### Website Crawling
+Automatically crawl and index website content:
 
-### For Local Models on Azure
+```bash
+# Crawl a website
+curl -X POST http://localhost:3000/api/website/crawl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "baseUrl": "https://example.com",
+    "maxPages": 20,
+    "respectRobots": true,
+    "crawlDelay": 1000
+  }'
 
-Configure these application settings in Azure Web App:
+# Auto-crawl current website
+curl -X POST http://localhost:3000/api/website/auto-crawl
+```
+
+### RAG Configuration
+Fine-tune RAG behavior:
+
+```bash
+# Check RAG status
+curl http://localhost:3000/api/health
+
+# View website crawl status
+curl http://localhost:3000/api/website/status
+```
+
+### How RAG Works
+1. **Document Processing**: Uploaded files are parsed and chunked into manageable pieces
+2. **Embedding Generation**: Each chunk is converted to vector embeddings
+3. **Query Processing**: User questions are embedded using the same model
+4. **Similarity Search**: Find the most relevant document chunks
+5. **Context Injection**: Relevant content is added to the AI prompt
+6. **Response Generation**: AI generates answers based on retrieved context
+7. **Source Attribution**: Responses include references to source documents
+
+## 🌐 Website Crawling Features
+
+### Auto-Crawling
+When enabled, the system automatically crawls your website to build a knowledge base:
+
+```env
+WEBSITE_AUTO_CRAWL=true
+WEBSITE_MAX_PAGES=50
+WEBSITE_CRAWL_DELAY=1000
+```
+
+### Manual Crawling
+Trigger crawls manually for external websites:
+
+```javascript
+// Example: Crawl a documentation site
+fetch('/api/website/crawl', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    baseUrl: 'https://docs.example.com',
+    maxPages: 30,
+    respectRobots: true,
+    includeExternalLinks: false,
+    crawlDelay: 1500
+  })
+});
+```
+
+### Crawl Configuration
+
+| Option | Description | Default | Range |
+|--------|-------------|---------|-------|
+| `maxPages` | Maximum pages to crawl | 50 | 1-200 |
+| `respectRobots` | Follow robots.txt rules | true | true/false |
+| `includeExternalLinks` | Crawl external domains | false | true/false |
+| `crawlDelay` | Delay between requests (ms) | 1000 | 500-5000 |
+
+## 🔧 API Endpoints
+
+### Chat & AI
+- `POST /api/chat` - Send message to AI with RAG support
+- `POST /api/model/initialize` - Initialize/switch local model
+- `GET /api/model/status` - Check model status and configuration
+
+### Document Management
+- `POST /api/upload` - Upload documents for RAG
+- `GET /api/documents` - List uploaded documents
+- `DELETE /api/documents/:id` - Remove document
+
+### Website Crawling
+- `POST /api/website/crawl` - Crawl external website
+- `POST /api/website/auto-crawl` - Crawl current website
+- `GET /api/website/status` - Check crawl status and statistics
+
+### Monitoring & Debug
+- `GET /api/health` - Comprehensive health check
+- `GET /api/debug/env` - Environment variables (masked)
+- `GET /api/system/memory` - Memory usage statistics
+
+## 🚀 Azure Deployment
+
+### Local Model Mode on Azure
+
+Configure these application settings in your Azure Web App:
 
 | Name | Value | Notes |
 |------|-------|-------|
 | `USE_LOCAL_MODEL` | `true` | Enable local model mode |
-| `LOCAL_MODEL_NAME` | `distilgpt2` | Choose appropriate model for your plan |
+| `LOCAL_MODEL_NAME` | `distilgpt2` | Choose based on your plan |
+| `RAG_CHUNK_SIZE` | `500` | Optimize for your use case |
+| `WEBSITE_AUTO_CRAWL` | `true` | Enable auto-crawling |
+| `WEBSITE_MAX_PAGES` | `20` | Limit for Azure plans |
 | `WEBSITE_NODE_DEFAULT_VERSION` | `~18` | Required for Transformers.js |
-| `SCM_DO_BUILD_DURING_DEPLOYMENT` | `true` | Ensure dependencies are installed |
+| `SCM_DO_BUILD_DURING_DEPLOYMENT` | `true` | Build dependencies |
 
-### Azure Plan Recommendations
-
-| Azure Plan | Recommended Model | Memory | Performance |
-|------------|-------------------|---------|-------------|
-| **Basic B1** | `distilgpt2` | 1.75GB | Good for testing |
-| **Standard S1** | `distilgpt2`, `bert-qa` | 1.75GB | Production ready |
-| **Standard S2** | `gpt2`, `flan-t5-small` | 3.5GB | Better quality |
-| **Premium P1V2+** | Any model | 7GB+ | Best performance |
-
-### For Azure OpenAI on Azure
+### Azure OpenAI Mode on Azure
 
 | Name | Value |
 |------|-------|
@@ -288,237 +314,240 @@ Configure these application settings in Azure Web App:
 | `AZURE_OPENAI_ENDPOINT` | `https://your-resource.openai.azure.com/` |
 | `AZURE_OPENAI_KEY` | `your-api-key-here` |
 | `AZURE_OPENAI_DEPLOYMENT` | `your-deployment-name` |
-| `WEBSITE_NODE_DEFAULT_VERSION` | `~18` |
+| `AZURE_OPENAI_VERSION` | `2024-08-01-preview` |
 
-## Supported Models
+### GitHub Actions Deployment
 
-### Local Models (Transformers.js)
-- **distilgpt2**: Fast, lightweight text generation (OpenAI/Hugging Face)
-- **gpt2**: Standard GPT-2 with better quality (OpenAI)
-- **distilbert-sentiment**: Sentiment analysis with conversational responses (Google/Hugging Face)
-- **bert-qa**: Question answering with context (Google)
-- **flan-t5-small**: Instruction-following text generation (Google)
+The included workflow ([.github/workflows/main_joerob-chatbot.yml](.github/workflows/main_joerob-chatbot.yml)) automatically deploys to Azure when you push to the main branch.
 
-### Azure OpenAI Models
-- **GPT-3.5 Series**: `gpt-35-turbo`, `gpt-35-turbo-16k`
-- **GPT-4 Series**: `gpt-4`, `gpt-4-32k`, `gpt-4-turbo`, `gpt-4o`
-- **o1 Series**: `o1-mini`, `o1-preview` (reasoning models)
+## 📝 Usage Examples
 
-## API Endpoints
-
-### Core Endpoints
-- `GET /` - Main chat interface
-- `POST /api/chat` - Send message to AI (works with both local and Azure models)
-- `GET /api/health` - Health check and configuration status
-
-### Local Model Management
-- `POST /api/model/initialize` - Initialize/load a local model
-- `GET /api/model/status` - Check local model status and configuration
-- `GET /api/system/memory` - Monitor memory usage
-
-### Debug Endpoints
-- `GET /api/debug/env` - Environment variable debugging (sensitive values masked)
-
-## Usage Examples
-
-### Switching Between Models
-
+### Basic Chat with RAG
 ```bash
-# Switch to local model
+# Send a message that will use RAG if documents are available
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "What are the best dog breeds for families?",
+    "useRAG": true,
+    "includeWebsiteContent": true
+  }'
+```
+
+### Upload and Query Documents
+```bash
+# Upload a document
+curl -X POST http://localhost:3000/api/upload \
+  -F "file=@company-handbook.pdf"
+
+# Ask a question about the document
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is our vacation policy?"}'
+```
+
+### Model Management
+```bash
+# Switch to a different model
 curl -X POST http://localhost:3000/api/model/initialize \
   -H "Content-Type: application/json" \
   -d '{"modelName": "gpt2"}'
 
 # Check model status
 curl http://localhost:3000/api/model/status
-
-# Send a chat message
-curl -X POST http://localhost:3000/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello, how are you?"}'
 ```
 
-### Testing Different Models
+## 🔍 Troubleshooting
 
-```bash
-# Test lightweight model
-curl -X POST http://localhost:3000/api/model/initialize \
-  -H "Content-Type: application/json" \
-  -d '{"modelName": "distilgpt2"}'
+### Common Issues
 
-# Test instruction-following model
-curl -X POST http://localhost:3000/api/model/initialize \
-  -H "Content-Type: application/json" \
-  -d '{"modelName": "flan-t5-small"}'
-
-# Test sentiment analysis model
-curl -X POST http://localhost:3000/api/model/initialize \
-  -H "Content-Type: application/json" \
-  -d '{"modelName": "distilbert-sentiment"}'
-```
-
-### Environment Variable Testing
-
-```bash
-# Check configuration
-curl http://localhost:3000/api/health
-
-# Debug environment variables
-curl http://localhost:3000/api/debug/env
-
-# Monitor memory usage
-curl http://localhost:3000/api/system/memory
-```
-
-## Troubleshooting
-
-### Local Model Issues
-
+#### Model Loading Issues
 1. **"Model is loading" error**
-   - Wait 30-60 seconds for model to download and initialize
-   - Check `/api/model/status` for current status
+   - Wait 30-60 seconds for model download and initialization
+   - Check model status: `GET /api/model/status`
+   - Ensure sufficient memory for the selected model
 
 2. **Memory issues**
    - Use smaller models (`distilgpt2` instead of `gpt2`)
-   - Check memory usage with `/api/system/memory`
-   - Restart the application to clear memory
+   - Check memory usage: `GET /api/debug/env`
+   - Restart application to clear memory
 
-3. **"Pipeline not ready" error**
-   - Ensure Node.js version 18+ is installed
-   - Check that `@xenova/transformers` is properly installed
+3. **RAG not working**
+   - Ensure embedder is initialized: `GET /api/health`
+   - Check if documents are uploaded/crawled
+   - Verify `useRAG: true` in chat requests
 
-4. **Poor response quality**
-   - Try a larger model (`gpt2` instead of `distilgpt2`)
-   - Consider switching to Azure OpenAI for production quality
-   - Ensure you're using the right model for your task
+#### Document Upload Issues
+4. **File upload fails**
+   - Check file size (10MB limit)
+   - Ensure file type is supported (.txt, .pdf, .docx, .md)
+   - Verify uploads directory exists and is writable
 
-### Azure OpenAI Issues
+5. **PDF parsing errors**
+   - Ensure PDF is not password-protected
+   - Try converting to .txt first for testing
+   - Check server logs for specific error details
 
-5. **"Configuration Error: Missing environment variables"**
-   - Verify all required environment variables are set
-   - Use `/api/debug/env` to check configuration
+#### Website Crawling Issues
+6. **Crawling fails**
+   - Check robots.txt compliance (`respectRobots: false` for testing)
+   - Verify target website is accessible
+   - Reduce `maxPages` for initial testing
 
-6. **"Azure OpenAI API Error (401)"**
-   - Verify your API key is correct and not expired
-   - Check that the key has proper permissions
+7. **No content indexed**
+   - Check crawl status: `GET /api/website/status`
+   - Ensure pages have substantial content (>100 characters)
+   - Verify crawl delay is appropriate for target site
 
-7. **"Azure OpenAI API Error (404)"**
-   - Verify your endpoint URL and deployment name
-   - Ensure the model is properly deployed in Azure
+### Performance Optimization
 
-### Model-Specific Issues
-
-8. **o1 Model Issues**
-   - o1 models don't support system roles or temperature
-   - Use `max_completion_tokens` instead of `max_tokens`
-
-9. **bert-qa model errors**
-   - Q&A models need specific input format
-   - Use for direct questions, not general conversation
-   - Switch to `distilgpt2` for general chat
-
-## Performance Optimization
-
-### Local Models
+#### Local Models
 - Start with `distilgpt2` for fastest performance
-- Use `gpt2` for better quality if you have sufficient memory
-- Monitor memory usage regularly with `/api/system/memory`
-- Consider model switching based on request type
+- Monitor memory usage regularly
+- Consider model switching based on request complexity
 
-### Azure Deployment
-- Use appropriate Azure plan for your chosen local model
-- Enable build during deployment for proper dependency installation
-- Consider using Azure OpenAI for production workloads requiring high quality
+#### RAG Performance
+- Optimize chunk size based on document types
+- Adjust `RAG_TOP_K` based on response quality needs
+- Balance crawl frequency with content freshness
 
-### Hybrid Approach
-- Use local models for development and testing
-- Switch to Azure OpenAI for production
-- Implement fallback from local to cloud models
+#### Azure Deployment
+- Choose appropriate Azure plan for selected model
+- Enable compression for file uploads
+- Use CDN for static assets if needed
 
-## Project Structure
+## 📊 Monitoring & Analytics
+
+### Health Monitoring
+```bash
+# Comprehensive health check
+curl http://localhost:3000/api/health
+
+# Returns:
+{
+  "status": "ok",
+  "models": {
+    "localModel": true,
+    "embedder": true
+  },
+  "rag": {
+    "documents": 5,
+    "chunks": 150,
+    "websitePages": 12
+  }
+}
+```
+
+### Memory Monitoring
+```bash
+# Check memory usage
+curl http://localhost:3000/api/debug/env
+
+# Returns memory statistics and configuration
+```
+
+### RAG Statistics
+```bash
+# Website crawl statistics
+curl http://localhost:3000/api/website/status
+
+# Returns crawl progress and indexed content stats
+```
+
+## 🗂️ Project Structure
 
 ```
 webappchatbot/
-├── public/
-│   └── index.html          # Frontend chat interface
-├── .github/
-│   └── workflows/
-│       └── main_joerob-chatbot.yml  # GitHub Actions deployment
-├── server.js               # Main Express server with local model support
-├── package.json           # Dependencies (includes @xenova/transformers)
-├── package-lock.json      # Locked dependency versions
-├── .env                   # Environment configuration (not in git)
-├── .gitignore             # Git ignore rules
-├── web.config             # IIS configuration for Azure
-└── README.md              # This file
+├── 📁 public/
+│   ├── index.html              # Main chat interface with debug panel
+│   └── dogs-qa.html            # Example knowledge base page
+├── 📁 uploads/                 # Uploaded documents (auto-created)
+├── 📁 .github/workflows/
+│   └── main_joerob-chatbot.yml # Azure deployment workflow
+├── 📄 server.js                # Main server with RAG, crawling, local models
+├── 📄 package.json             # Dependencies including transformers
+├── 📄 .env                     # Environment configuration (not in git)
+├── 📄 .gitignore               # Git ignore rules
+├── 📄 web.config               # IIS configuration for Azure
+├── 📄 LICENSE                  # MIT license
+└── 📄 README.md                # This comprehensive guide
 ```
 
-## Migration Guide
+## 🔮 Advanced Features
 
-### From Azure-Only to Hybrid Mode
+### Hybrid AI Approach
+- **Development**: Use local models for fast iteration
+- **Production**: Switch to Azure OpenAI for best quality
+- **Fallback**: Automatic fallback between local and cloud models
 
-1. **Update dependencies**: `npm install @xenova/transformers dotenv`
-2. **Create `.env` file**: Add local model configuration
-3. **Update server.js**: Use the enhanced version with local model support
-4. **Test locally**: Start with `distilgpt2` for testing
-5. **Deploy**: Update Azure app settings for your preferred mode
+### Content Management
+- **Document Versioning**: Track document updates and changes
+- **Content Expiration**: Automatic refresh of crawled content
+- **Source Prioritization**: Weight different content sources
 
-### From Local-Only to Hybrid Mode
+### Customization Options
+- **Model Switching**: Change models without restart
+- **RAG Tuning**: Adjust retrieval parameters per use case
+- **Custom Crawling**: Specialized crawlers for specific sites
 
-1. **Add Azure configuration**: Set Azure OpenAI environment variables
-2. **Set fallback mode**: `USE_LOCAL_MODEL=false` to use Azure as primary
-3. **Test both modes**: Verify both local and Azure models work
+## 🚀 Future Enhancements
 
-## Future Roadmap
+### Planned Features
+- **Ollama Integration**: Support for larger local models
+- **Vector Database**: Persistent storage for embeddings
+- **Multi-language Support**: Support for non-English content
+- **Streaming Responses**: Real-time response streaming
+- **Advanced Analytics**: Usage patterns and performance metrics
 
-### Planned Enhancements
-- **Ollama Integration**: Support for larger open-source models locally
-- **External Model APIs**: Integration with Hugging Face, Replicate, etc.
-- **Model Switching UI**: Frontend interface for changing models
-- **Quantized Models**: Support for smaller versions of larger models
-- **Streaming Responses**: Real-time response streaming for better UX
+### Integration Opportunities
+- **Database Integration**: Connect to existing databases
+- **API Integrations**: External knowledge sources
+- **Authentication**: User management and access control
+- **Caching**: Redis for improved performance
 
-### Open Source Model Support
-- **Meta Llama**: Via Ollama or external APIs
-- **Anthropic Claude**: Via API integration
-- **Mistral Models**: Via Ollama or Hugging Face
-- **Code Models**: CodeLlama, StarCoder via external services
-
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
 3. Test with both local and Azure models
-4. Ensure memory usage is reasonable
-5. Test with multiple model types
+4. Test RAG functionality with sample documents
+5. Ensure memory usage is reasonable
 6. Submit a pull request
 
-## License
+### Development Guidelines
+- Test with multiple model types
+- Verify RAG performance with various document types
+- Check memory usage with different configurations
+- Ensure backward compatibility
+- Add appropriate error handling
+
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Support
+## 🆘 Support
 
-For issues and questions:
-1. **Local Model Issues**: Check memory usage and model status endpoints
-2. **Azure Issues**: Verify configuration with debug endpoints
-3. **Performance Issues**: Try different models or Azure plans
-4. **Model Selection**: Use the recommendations above
-5. **General Issues**: Open an issue in this repository
+### Getting Help
+
+1. **Quick Start Issues**: Follow the troubleshooting guide above
+2. **Model Selection**: Use the model recommendation table
+3. **RAG Problems**: Check health endpoints for system status
+4. **Performance Issues**: Monitor memory usage and optimize configuration
+5. **Deployment Issues**: Verify Azure configuration settings
 
 ### Useful Debug Commands
 
 ```bash
-# Check overall health
+# Complete system health check
 curl http://localhost:3000/api/health
 
-# Check model status
+# Model status and memory usage
 curl http://localhost:3000/api/model/status
 
-# Monitor memory
-curl http://localhost:3000/api/system/memory
+# RAG and crawling status
+curl http://localhost:3000/api/website/status
 
-# Test environment variables
+# Environment configuration
 curl http://localhost:3000/api/debug/env
 
 # Test model switching
@@ -527,11 +556,21 @@ curl -X POST http://localhost:3000/api/model/initialize \
   -d '{"modelName": "distilgpt2"}'
 ```
 
-### Quick Start Recommendations
+### Community & Issues
 
-**New to AI models?** Start with `distilgpt2`
-**Want better quality?** Use `gpt2` 
-**Need instruction following?** Try `flan-t5-small`
-**Production deployment?** Consider Azure OpenAI
-**Limited memory?** Stick with `distilgpt2`
-**Development/testing?** Any model works, `distilgpt2` is fastest
+- **GitHub Issues**: Report bugs and request features
+- **Discussions**: Share tips and use cases
+- **Documentation**: Contribute to improve this guide
+
+---
+
+## 🎯 Quick Start Recommendations
+
+- **New Users**: Start with `distilgpt2` and auto-crawl enabled
+- **Better Quality**: Upgrade to `gpt2` when ready
+- **Production**: Consider Azure OpenAI for best results
+- **Limited Memory**: Stick with `distilgpt2` and optimize RAG settings
+- **Development**: Use local models for fast iteration
+- **Enterprise**: Combine local models with Azure OpenAI fallback
+
+This comprehensive chatbot solution provides enterprise-grade AI capabilities with the flexibility to run entirely local or leverage cloud services as needed.

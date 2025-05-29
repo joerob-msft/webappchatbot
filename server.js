@@ -3,10 +3,45 @@ require('dotenv').config();
 
 const express = require('express');
 const path = require('path');
+const multer = require('multer');
+const fs = require('fs').promises;
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
+const cheerio = require('cheerio');
+const axios = require('axios');
+const robotsParser = require('robots-parser');
+
 const app = express();
+
+// Configure multer for file uploads (Multer 2.x syntax)
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/');
+    },
+    filename: function (req, file, cb) {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    limits: {
+        fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+    fileFilter: (req, file, cb) => {
+        const allowedTypes = ['.txt', '.pdf', '.docx', '.md'];
+        const ext = path.extname(file.originalname).toLowerCase();
+        if (allowedTypes.includes(ext)) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only .txt, .pdf, .docx, and .md files are allowed'));
+        }
+    }
+});
 
 // Add Transformers.js import
 let pipeline;
+let embedder = null;
 (async () => {
     const { pipeline: importedPipeline } = await import('@xenova/transformers');
     pipeline = importedPipeline;
@@ -16,6 +51,16 @@ let pipeline;
 let localModel = null;
 let modelLoading = false;
 let modelError = null;
+
+// RAG Document Store
+let documentStore = [];
+let documentEmbeddings = [];
+let websiteCrawlData = {
+    lastCrawl: null,
+    crawlInProgress: false,
+    crawledPages: 0,
+    errors: []
+};
 
 // Middleware
 app.use(express.json());
@@ -27,88 +72,555 @@ app.use((req, res, next) => {
     next();
 });
 
-// Local model configurations
+// Get local model information
 function getLocalModelInfo(modelName) {
-    const models = {
-        'distilgpt2': {
+    const modelConfig = {
+        'Xenova/distilgpt2': {
             task: 'text-generation',
-            name: 'Xenova/distilgpt2',
-            type: 'generation',
             size: 'small',
-            description: 'Fast, lightweight text generation'
+            description: 'Fast, lightweight text generation model',
+            memoryUsage: '~250MB'
         },
-        'gpt2': {
+        'Xenova/gpt2': {
             task: 'text-generation',
-            name: 'Xenova/gpt2',
-            type: 'generation',
             size: 'medium',
-            description: 'Standard GPT-2 model'
+            description: 'Standard GPT-2 text generation model',
+            memoryUsage: '~700MB'
         },
-        'distilbert-sentiment': {
+        'Xenova/distilbert-base-uncased-finetuned-sst-2-english': {
             task: 'sentiment-analysis',
-            name: 'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
-            type: 'sentiment',
             size: 'small',
-            description: 'Sentiment analysis with conversational response'
+            description: 'Sentiment analysis with conversational responses',
+            memoryUsage: '~400MB'
         },
-        'bert-qa': {
+        'Xenova/distilbert-base-cased-distilled-squad': {
             task: 'question-answering',
-            name: 'Xenova/distilbert-base-cased-distilled-squad',
-            type: 'qa',
-            size: 'small',
-            description: 'Question answering model'
+            size: 'medium',
+            description: 'Question answering with context',
+            memoryUsage: '~400MB'
         },
-        'flan-t5-small': {
+        'Xenova/flan-t5-small': {
             task: 'text2text-generation',
-            name: 'Xenova/flan-t5-small',
-            type: 'text2text',
             size: 'small',
-            description: 'Instruction-following text generation'
+            description: 'Instruction-following text generation',
+            memoryUsage: '~450MB'
+        },
+        'Xenova/LaMini-Flan-T5-248M': {
+            task: 'text2text-generation',
+            size: 'small',
+            description: 'Conversational instruction-following model',
+            memoryUsage: '~300MB'
         }
     };
     
-    return models[modelName] || models['distilgpt2'];
+    return modelConfig[modelName] || {
+        task: 'text-generation',
+        size: 'unknown',
+        description: 'Unknown model',
+        memoryUsage: 'Unknown'
+    };
+}
+
+// Initialize embedder for RAG
+async function initializeEmbedder() {
+    if (embedder) return embedder;
+    
+    try {
+        console.log('Initializing text embedder for RAG...');
+        embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+        console.log('✅ Embedder initialized successfully!');
+        return embedder;
+    } catch (error) {
+        console.error('❌ Failed to initialize embedder:', error);
+        return null;
+    }
 }
 
 // Initialize local model
-async function initializeLocalModel(modelName = 'distilgpt2') {
+async function initializeLocalModel(modelName = 'Xenova/LaMini-Flan-T5-248M') {
+    if (localModel && !modelLoading) {
+        console.log('Local model already initialized');
+        return true;
+    }
+    
     if (modelLoading) {
         console.log('Model already loading...');
         return false;
     }
     
-    if (!pipeline) {
-        console.log('Pipeline not ready yet, waiting...');
-        return false;
+    modelLoading = true;
+    modelError = null;
+    
+    // Define fallback models in order of preference
+    const fallbackModels = [
+        modelName,
+        'Xenova/LaMini-Flan-T5-248M',
+        'Xenova/distilbert-base-uncased-finetuned-sst-2-english',
+        'Xenova/distilgpt2',
+        'Xenova/gpt2'
+    ];
+    
+    for (const fallbackModel of [...new Set(fallbackModels)]) {
+        try {
+            console.log(`\n🤖 TRYING MODEL: ${fallbackModel}`);
+            console.log('Loading pipeline...');
+            
+            const modelInfo = getLocalModelInfo(fallbackModel);
+            console.log(`Task: ${modelInfo.task}`);
+            console.log(`Expected memory usage: ${modelInfo.memoryUsage}`);
+            
+            if (modelInfo.task === 'text-generation') {
+                localModel = await pipeline('text-generation', fallbackModel);
+            } else if (modelInfo.task === 'sentiment-analysis') {
+                localModel = await pipeline('sentiment-analysis', fallbackModel);
+            } else if (modelInfo.task === 'question-answering') {
+                localModel = await pipeline('question-answering', fallbackModel);
+            } else if (modelInfo.task === 'text2text-generation') {
+                localModel = await pipeline('text2text-generation', fallbackModel);
+            } else {
+                throw new Error(`Unsupported task type: ${modelInfo.task}`);
+            }
+            
+            modelLoading = false;
+            console.log(`✅ Successfully loaded model: ${fallbackModel}`);
+            
+            // Update the environment variable to remember successful model
+            process.env.LOCAL_MODEL_NAME = fallbackModel;
+            
+            return true;
+            
+        } catch (error) {
+            console.log(`❌ Failed to load ${fallbackModel}: ${error.message}`);
+            
+            if (fallbackModel === fallbackModels[fallbackModels.length - 1]) {
+                // This was the last fallback option
+                modelLoading = false;
+                modelError = `All model loading attempts failed. Last error: ${error.message}`;
+                console.error('❌ All fallback models failed');
+                return false;
+            }
+            
+            // Continue to next fallback model
+            console.log('⏭️ Trying next fallback model...');
+        }
     }
     
+    modelLoading = false;
+    modelError = 'No models could be loaded';
+    return false;
+}
+
+// Website crawling functions
+async function crawlWebsite(baseUrl, options = {}) {
+    const {
+        maxPages = 50,
+        respectRobots = true,
+        includeExternalLinks = false,
+        crawlDelay = 1000,
+        userAgent = 'WebAppChatbot/1.0'
+    } = options;
+
+    console.log(`\n=== STARTING WEBSITE CRAWL ===`);
+    console.log('Base URL:', baseUrl);
+    console.log('Max pages:', maxPages);
+    console.log('Crawl delay:', crawlDelay + 'ms');
+
+    websiteCrawlData.crawlInProgress = true;
+    websiteCrawlData.errors = [];
+    websiteCrawlData.crawledPages = 0;
+
+    const visitedUrls = new Set();
+    const urlsToVisit = [baseUrl];
+    const crawledPages = [];
+    let robotsTxt = null;
+
+    // Check robots.txt if requested
+    if (respectRobots) {
+        try {
+            const robotsUrl = new URL('/robots.txt', baseUrl).href;
+            const robotsResponse = await axios.get(robotsUrl, { timeout: 5000 });
+            robotsTxt = robotsParser(robotsUrl, robotsResponse.data);
+            console.log('✅ Loaded robots.txt');
+        } catch (error) {
+            console.log('ℹ️  No robots.txt found or accessible');
+        }
+    }
+
+    while (urlsToVisit.length > 0 && crawledPages.length < maxPages) {
+        const currentUrl = urlsToVisit.shift();
+        
+        if (visitedUrls.has(currentUrl)) continue;
+        visitedUrls.add(currentUrl);
+
+        // Check robots.txt permissions
+        if (robotsTxt && !robotsTxt.isAllowed(currentUrl, userAgent)) {
+            console.log(`🚫 Robots.txt disallows: ${currentUrl}`);
+            continue;
+        }
+
+        try {
+            console.log(`🔍 Crawling: ${currentUrl}`);
+            
+            const response = await axios.get(currentUrl, {
+                timeout: 10000,
+                headers: {
+                    'User-Agent': userAgent
+                }
+            });
+
+            if (response.headers['content-type']?.includes('text/html')) {
+                const $ = cheerio.load(response.data);
+                
+                // Extract page content
+                const pageData = extractPageContent($, currentUrl);
+                
+                if (pageData.content.trim().length > 100) { // Only store pages with substantial content
+                    crawledPages.push(pageData);
+                    websiteCrawlData.crawledPages++;
+                    console.log(`✅ Extracted content from: ${pageData.title || currentUrl}`);
+                }
+
+                // Find more URLs to crawl
+                if (crawledPages.length < maxPages) {
+                    const newUrls = extractLinksFromPage($, currentUrl, baseUrl, includeExternalLinks);
+                    newUrls.forEach(url => {
+                        if (!visitedUrls.has(url) && !urlsToVisit.includes(url)) {
+                            urlsToVisit.push(url);
+                        }
+                    });
+                }
+            }
+
+            // Respectful crawling delay
+            if (crawlDelay > 0) {
+                await new Promise(resolve => setTimeout(resolve, crawlDelay));
+            }
+
+        } catch (error) {
+            console.error(`❌ Error crawling ${currentUrl}:`, error.message);
+            websiteCrawlData.errors.push({
+                url: currentUrl,
+                error: error.message
+            });
+        }
+    }
+
+    websiteCrawlData.crawlInProgress = false;
+    websiteCrawlData.lastCrawl = new Date().toISOString();
+
+    console.log(`=== CRAWL COMPLETE ===`);
+    console.log(`Crawled ${crawledPages.length} pages`);
+    console.log(`Errors: ${websiteCrawlData.errors.length}`);
+
+    return crawledPages;
+}
+
+function extractPageContent($, url) {
+    // Remove unwanted elements
+    $('script, style, nav, header, footer, .sidebar, .menu, .navigation').remove();
+    
+    // Extract title
+    const title = $('title').text().trim() || 
+                  $('h1').first().text().trim() || 
+                  'Untitled Page';
+    
+    // Extract meta description
+    const description = $('meta[name="description"]').attr('content') || '';
+    
+    // Extract main content
+    let content = '';
+    
+    // Try common content containers first
+    const contentSelectors = [
+        'main',
+        '[role="main"]',
+        '.content',
+        '.main-content',
+        '.post-content',
+        '.article-content',
+        'article',
+        '.page-content'
+    ];
+    
+    for (const selector of contentSelectors) {
+        const element = $(selector);
+        if (element.length > 0) {
+            content = element.text().trim();
+            break;
+        }
+    }
+    
+    // Fallback to body content if no specific container found
+    if (!content) {
+        content = $('body').text().trim();
+    }
+    
+    // Clean up content
+    content = content
+        .replace(/\s+/g, ' ')  // Normalize whitespace
+        .replace(/\n+/g, '\n') // Normalize line breaks
+        .trim();
+    
+    // Extract headings for structure
+    const headings = [];
+    $('h1, h2, h3, h4, h5, h6').each((i, el) => {
+        const text = $(el).text().trim();
+        const level = el.tagName.toLowerCase();
+        if (text) {
+            headings.push({ level, text });
+        }
+    });
+    
+    return {
+        url,
+        title,
+        description,
+        content,
+        headings,
+        wordCount: content.split(' ').length,
+        extractedAt: new Date().toISOString()
+    };
+}
+
+function extractLinksFromPage($, currentUrl, baseUrl, includeExternalLinks) {
+    const links = [];
+    const currentDomain = new URL(baseUrl).hostname;
+    
+    $('a[href]').each((i, el) => {
+        try {
+            const href = $(el).attr('href');
+            const absoluteUrl = new URL(href, currentUrl).href;
+            const urlObj = new URL(absoluteUrl);
+            
+            // Skip non-HTTP(S) links
+            if (!['http:', 'https:'].includes(urlObj.protocol)) return;
+            
+            // Skip file extensions that aren't web pages
+            const skipExtensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.zip', '.tar', '.gz', '.jpg', '.jpeg', '.png', '.gif', '.svg', '.mp3', '.mp4', '.avi'];
+            if (skipExtensions.some(ext => urlObj.pathname.toLowerCase().endsWith(ext))) return;
+            
+            // Include external links only if specified
+            if (!includeExternalLinks && urlObj.hostname !== currentDomain) return;
+            
+            // Skip common non-content URLs
+            const skipPatterns = ['/wp-admin/', '/admin/', '/login/', '/logout/', '/register/', '/cart/', '/checkout/'];
+            if (skipPatterns.some(pattern => urlObj.pathname.includes(pattern))) return;
+            
+            links.push(absoluteUrl);
+        } catch (error) {
+            // Invalid URL, skip
+        }
+    });
+    
+    return [...new Set(links)]; // Remove duplicates
+}
+
+// Chunk text into smaller pieces
+function chunkText(text, chunkSize = 500, overlap = 50) {
+    const words = text.split(/\s+/);
+    const chunks = [];
+    
+    for (let i = 0; i < words.length; i += chunkSize - overlap) {
+        const chunk = words.slice(i, i + chunkSize).join(' ');
+        if (chunk.trim()) {
+            chunks.push(chunk.trim());
+        }
+    }
+    
+    return chunks;
+}
+
+// Generate embeddings for text
+async function generateEmbedding(text) {
+    if (!embedder) {
+        await initializeEmbedder();
+    }
+    
+    if (!embedder) {
+        throw new Error('Embedder not available');
+    }
+    
+    const result = await embedder(text, { pooling: 'mean', normalize: true });
+    return Array.from(result.data);
+}
+
+// Calculate cosine similarity
+function cosineSimilarity(a, b) {
+    const dotProduct = a.reduce((sum, val, i) => sum + val * b[i], 0);
+    const magnitudeA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+    const magnitudeB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+    return dotProduct / (magnitudeA * magnitudeB);
+}
+
+// Process website pages into chunks and embeddings
+async function processWebsitePages(pages) {
+    console.log(`\n=== PROCESSING ${pages.length} WEBSITE PAGES ===`);
+    
+    // Initialize embedder if needed
+    if (!embedder) {
+        await initializeEmbedder();
+    }
+    
+    if (!embedder) {
+        throw new Error('Embedder not available for processing website pages');
+    }
+    
+    const processedChunks = [];
+    
+    for (const page of pages) {
+        console.log(`Processing: ${page.title}`);
+        
+        // Create structured content for better chunking
+        let structuredContent = `${page.title}\n\n`;
+        if (page.description) {
+            structuredContent += `${page.description}\n\n`;
+        }
+        structuredContent += page.content;
+        
+        // Chunk the content
+        const chunks = chunkText(structuredContent, 500, 50);
+        
+        // Generate embeddings for each chunk
+        for (let i = 0; i < chunks.length; i++) {
+            const chunk = chunks[i];
+            try {
+                const embedding = await generateEmbedding(chunk);
+                processedChunks.push({
+                    chunk,
+                    embedding,
+                    source: `${page.title} (${page.url})`,
+                    url: page.url,
+                    title: page.title,
+                    chunkIndex: i,
+                    pageIndex: pages.indexOf(page),
+                    type: 'website'
+                });
+            } catch (error) {
+                console.error(`Error generating embedding for chunk ${i} of ${page.title}:`, error);
+            }
+        }
+    }
+    
+    console.log(`✅ Processed ${processedChunks.length} chunks from ${pages.length} pages`);
+    return processedChunks;
+}
+
+// Main crawl and index function
+async function crawlAndIndexWebsite(baseUrl = null, options = {}) {
+    // Use provided URL or try to detect from request
+    const targetUrl = baseUrl || `http://localhost:${process.env.PORT || 3000}`;
+    
+    console.log(`Starting crawl and index of: ${targetUrl}`);
+    
     try {
-        modelLoading = true;
-        modelError = null;
-        console.log(`\n=== INITIALIZING LOCAL MODEL: ${modelName} ===`);
+        // Crawl the website
+        const pages = await crawlWebsite(targetUrl, options);
         
-        const modelInfo = getLocalModelInfo(modelName);
-        console.log('Model info:', modelInfo);
+        if (pages.length === 0) {
+            console.log('No pages found to index');
+            return;
+        }
         
-        console.log('Loading model... This may take a few minutes on first run.');
-        localModel = await pipeline(modelInfo.task, modelInfo.name);
+        // Process pages into chunks and embeddings
+        const websiteChunks = await processWebsitePages(pages);
         
-        console.log('✅ Local model loaded successfully!');
-        console.log('=== MODEL INITIALIZATION COMPLETE ===\n');
-        modelLoading = false;
-        return true;
+        // Remove old website content
+        documentEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+        documentStore = documentStore.filter(d => d.type !== 'website');
+        
+        // Add new website content
+        documentEmbeddings.push(...websiteChunks);
+        
+        // Add website info to document store
+        const websiteDoc = {
+            filename: `Website: ${targetUrl}`,
+            type: 'website',
+            uploadedAt: new Date().toISOString(),
+            chunks: websiteChunks.length,
+            pages: pages.length,
+            totalLength: pages.reduce((sum, page) => sum + page.content.length, 0),
+            baseUrl: targetUrl
+        };
+        
+        documentStore.push(websiteDoc);
+        
+        console.log(`✅ Website indexing complete: ${pages.length} pages, ${websiteChunks.length} chunks`);
         
     } catch (error) {
-        console.error('❌ Failed to load local model:', error);
-        modelError = error.message;
-        modelLoading = false;
-        localModel = null;
-        return false;
+        console.error('Error during website crawl and index:', error);
+        websiteCrawlData.crawlInProgress = false;
+        throw error;
     }
 }
 
-// Generate response using local model
-async function generateLocalResponse(message, modelName = 'distilgpt2') {
+// Retrieve relevant documents
+async function retrieveRelevantChunks(query, topK = 3) {
+    if (documentEmbeddings.length === 0) {
+        return [];
+    }
+    
+    const queryEmbedding = await generateEmbedding(query);
+    
+    const similarities = documentEmbeddings.map((docEmb, index) => ({
+        index,
+        similarity: cosineSimilarity(queryEmbedding, docEmb.embedding),
+        chunk: docEmb.chunk,
+        source: docEmb.source,
+        url: docEmb.url || null,
+        type: docEmb.type || 'document'
+    }));
+    
+    return similarities
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, topK);
+}
+
+// Generate response using local model with RAG
+async function generateLocalResponseWithRAG(message, modelName = 'distilgpt2', useRAG = true, includeWebsiteContent = true) {
+    let context = '';
+    let sources = [];
+    
+    // Retrieve relevant documents if RAG is enabled
+    if (useRAG && documentEmbeddings.length > 0) {
+        console.log('Retrieving relevant documents for RAG...');
+        
+        // Filter embeddings based on preferences
+        let availableEmbeddings = documentEmbeddings;
+        if (!includeWebsiteContent) {
+            availableEmbeddings = documentEmbeddings.filter(d => d.type !== 'website');
+        }
+        
+        if (availableEmbeddings.length > 0) {
+            const queryEmbedding = await generateEmbedding(message);
+            
+            const similarities = availableEmbeddings.map((docEmb, index) => ({
+                index,
+                similarity: cosineSimilarity(queryEmbedding, docEmb.embedding),
+                chunk: docEmb.chunk,
+                source: docEmb.source,
+                url: docEmb.url || null,
+                type: docEmb.type || 'document'
+            }));
+            
+            const relevantChunks = similarities
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, 3);
+            
+            if (relevantChunks.length > 0) {
+                context = relevantChunks.map(chunk => chunk.chunk).join('\n\n');
+                sources = [...new Set(relevantChunks.map(chunk => chunk.source))];
+                
+                console.log(`Found ${relevantChunks.length} relevant chunks from: ${sources.join(', ')}`);
+                console.log('Content types:', [...new Set(relevantChunks.map(c => c.type))]);
+            }
+        }
+    }
+    
+    // Generate response with context
+    return await generateResponseWithContext(message, context, sources, modelName);
+}
+
+async function generateResponseWithContext(message, context, sources, modelName) {
     if (!localModel) {
         throw new Error('Local model not initialized');
     }
@@ -117,233 +629,75 @@ async function generateLocalResponse(message, modelName = 'distilgpt2') {
     
     try {
         if (modelInfo.task === 'text-generation') {
-            const result = await localModel(message, {
-                max_new_tokens: 100,
+            let prompt = message;
+            
+            if (context) {
+                prompt = `Context from documentation and website:
+${context}
+
+Question: ${message}
+
+Based on the context above, please provide a helpful and accurate answer:`;
+            }
+            
+            const result = await localModel(prompt, {
+                max_new_tokens: 200,
                 temperature: 0.7,
                 do_sample: true,
                 return_full_text: false
             });
             
-            return result[0].generated_text.trim();
+            let response = result[0].generated_text.trim();
             
-        } else if (modelInfo.task === 'sentiment-analysis') {
-            const result = await localModel(message);
-            const sentiment = result[0];
-            return `I analyzed your message sentiment as ${sentiment.label.toLowerCase()} (${(sentiment.score * 100).toFixed(1)}% confidence). How can I help you further?`;
-            
-        } else if (modelInfo.task === 'question-answering') {
-            // Provide a comprehensive knowledge base as context
-            const context = `Artificial Intelligence (AI) is a branch of computer science that aims to create intelligent machines that can perform tasks typically requiring human intelligence. AI systems can learn, reason, perceive, and make decisions.
-
-Key areas of AI include:
-- Machine Learning: Systems that learn from data
-- Natural Language Processing: Understanding and generating human language
-- Computer Vision: Interpreting visual information
-- Robotics: Creating intelligent physical systems
-- Expert Systems: Knowledge-based decision making
-
-AI applications include chatbots, recommendation systems, autonomous vehicles, medical diagnosis, fraud detection, and virtual assistants. AI works by processing large amounts of data, identifying patterns, and making predictions or decisions based on that learning.
-
-Machine learning is a subset of AI that uses algorithms to automatically learn and improve from experience without being explicitly programmed. Deep learning uses neural networks with multiple layers to model complex patterns in data.
-
-AI has both benefits and challenges, including automation of tasks, improved efficiency, but also concerns about job displacement and ethical considerations.`;
-            
-            try {
-                const result = await localModel({
-                    question: message,
-                    context: context
-                });
-                
-                console.log('Q&A Model Result:', result);
-                
-                // Check if we got a meaningful answer
-                if (result && result.answer && result.answer.trim() && result.answer.length > 3) {
-                    const confidence = result.score || 0;
-                    
-                    // If confidence is reasonable, return the answer
-                    if (confidence > 0.05) {
-                        return `${result.answer.trim()}
-
-(Based on my knowledge base with ${(confidence * 100).toFixed(1)}% confidence)`;
-                    }
-                }
-                
-                // Fallback for low confidence or poor answers
-                return `Based on your question "${message}", here's what I can tell you:
-
-Artificial Intelligence (AI) refers to computer systems that can perform tasks that typically require human intelligence, such as learning, reasoning, and problem-solving. AI includes machine learning, natural language processing, and computer vision.
-
-Would you like me to explain any specific aspect of AI in more detail?`;
-                
-            } catch (qaError) {
-                console.error('Q&A model specific error:', qaError);
-                
-                // Provide a general response based on the question topic
-                if (message.toLowerCase().includes('artificial intelligence') || message.toLowerCase().includes('ai')) {
-                    return `I can help explain artificial intelligence! AI is technology that enables computers to perform tasks that typically require human intelligence, like learning, reasoning, and problem-solving. It includes areas like machine learning, natural language processing, and computer vision.
-
-What specific aspect of AI would you like to know more about?`;
-                }
-                
-                return `I understand you're asking about: "${message}"
-
-While I'm having some technical difficulties with my Q&A processing, I'd be happy to help if you can rephrase your question or ask about something specific. You might also try switching to the 'distilgpt2' model for general conversation.`;
+            if (sources.length > 0) {
+                response += `\n\n📚 **Sources:**\n${sources.map(s => `• ${s}`).join('\n')}`;
             }
+            
+            return response;
             
         } else if (modelInfo.task === 'text2text-generation') {
-            const result = await localModel(message, {
-                max_new_tokens: 100
+            let prompt = `Answer the following question based on the provided context.
+
+Context: ${context || 'No specific context provided.'}
+
+Question: ${message}
+
+Answer:`;
+            
+            const result = await localModel(prompt, {
+                max_new_tokens: 200
             });
             
-            return result[0].generated_text.trim();
-        }
-        
-        return "I received your message but couldn't process it with the current model configuration.";
-        
-    } catch (error) {
-        console.error('Error generating local response:', error);
-        console.error('Error details:', {
-            message: error.message,
-            stack: error.stack,
-            modelInfo: modelInfo
-        });
-        
-        // Provide more specific error handling for Q&A models
-        if (modelInfo.task === 'question-answering') {
-            // Try to give a helpful response even when the model fails
-            if (message.toLowerCase().includes('artificial intelligence') || message.toLowerCase().includes('ai')) {
-                return `I can help with that! Artificial Intelligence (AI) is a field of computer science focused on creating systems that can perform tasks requiring human-like intelligence. This includes learning from data, recognizing patterns, making decisions, and understanding language.
-
-Common AI applications include virtual assistants, recommendation systems, and autonomous vehicles. Would you like to know more about any specific area of AI?
-
-(Note: I'm currently experiencing some technical issues with the Q&A model, but I can still provide helpful information!)`;
+            let response = result[0].generated_text.trim();
+            
+            if (sources.length > 0) {
+                response += `\n\n📚 **Sources:**\n${sources.map(s => `• ${s}`).join('\n')}`;
             }
             
-            return `I'd be happy to help answer your question: "${message}"
-
-I'm currently experiencing some technical difficulties with the question-answering model. For the best experience, you might want to:
-
-1. Try rephrasing your question more specifically
-2. Switch to the 'distilgpt2' model for general conversation
-3. Or ask about topics I have specific knowledge about
-
-You can switch models by updating your LOCAL_MODEL_NAME environment variable to 'distilgpt2'.`;
+            return response;
         }
         
+        // Fallback for other model types
+        const result = await localModel(message, {
+            max_new_tokens: 150,
+            temperature: 0.7
+        });
+        
+        let response = result[0]?.generated_text || result.answer || "I couldn't generate a response.";
+        
+        if (sources.length > 0) {
+            response += `\n\n📚 **Sources:**\n${sources.map(s => `• ${s}`).join('\n')}`;
+        }
+        
+        return response;
+        
+    } catch (error) {
+        console.error('Error generating response with context:', error);
         throw error;
     }
 }
 
-function getModelInfo(deploymentName) {
-    const name = deploymentName.toLowerCase();
-    
-    // o1 Series Models
-    if (name.includes('o1-mini') || name.includes('o1-preview') || name.match(/^o1$/)) {
-        return {
-            series: 'o1',
-            type: 'reasoning',
-            supportsSystemRole: false,
-            tokenParam: 'max_completion_tokens',
-            supportsTemperature: false,
-            requiredApiVersion: '2024-12-01-preview',
-            maxTokens: 65536
-        };
-    }
-    
-    // GPT-4 Series
-    if (name.includes('gpt-4')) {
-        return {
-            series: 'gpt-4',
-            type: 'chat',
-            supportsSystemRole: true,
-            tokenParam: 'max_tokens',
-            supportsTemperature: true,
-            requiredApiVersion: '2024-08-01-preview',
-            maxTokens: name.includes('32k') ? 32768 : 
-                      name.includes('turbo') || name.includes('4o') ? 128000 : 8192
-        };
-    }
-    
-    // GPT-3.5 Series
-    if (name.includes('gpt-35') || name.includes('gpt-3.5')) {
-        return {
-            series: 'gpt-3.5',
-            type: 'chat',
-            supportsSystemRole: true,
-            tokenParam: 'max_tokens',
-            supportsTemperature: true,
-            requiredApiVersion: '2024-08-01-preview',
-            maxTokens: name.includes('16k') ? 16384 : 4096
-        };
-    }
-    
-    // Default for unknown models (assume GPT-like)
-    return {
-        series: 'unknown',
-        type: 'chat',
-        supportsSystemRole: true,
-        tokenParam: 'max_tokens',
-        supportsTemperature: true,
-        requiredApiVersion: '2024-08-01-preview',
-        maxTokens: 4096
-    };
-}
-
-function isO1Model(deploymentName) {
-    return getModelInfo(deploymentName).series === 'o1';
-}
-
-// Helper function to get appropriate API version for model
-function getApiVersion(deploymentName) {
-    const modelInfo = getModelInfo(deploymentName);
-    return process.env.AZURE_OPENAI_VERSION || modelInfo.requiredApiVersion;
-}
-
-// Helper function to build messages array based on model type
-function buildMessages(userMessage, deploymentName) {
-    const modelInfo = getModelInfo(deploymentName);
-    
-    if (modelInfo.supportsSystemRole) {
-        return [
-            {
-                role: 'system',
-                content: 'You are a helpful AI assistant.'
-            },
-            {
-                role: 'user',
-                content: userMessage
-            }
-        ];
-    } else {
-        return [
-            {
-                role: 'user',
-                content: userMessage
-            }
-        ];
-    }
-}
-
-// Helper function to get model-specific parameters
-function getModelParameters(deploymentName) {
-    const modelInfo = getModelInfo(deploymentName);
-    const baseParams = {};
-    
-    // Set token limit parameter
-    baseParams[modelInfo.tokenParam] = Math.min(1000, modelInfo.maxTokens);
-    
-    // Add temperature and other parameters if supported
-    if (modelInfo.supportsTemperature) {
-        baseParams.temperature = 0.7;
-        baseParams.top_p = 0.95;
-        baseParams.frequency_penalty = 0;
-        baseParams.presence_penalty = 0;
-    }
-    
-    return baseParams;
-}
-
-// Enhanced Chat API endpoint with local model support
+// Chat API endpoint with RAG support
 app.post('/api/chat', async (req, res) => {
     const startTime = Date.now();
     console.log('\n=== CHAT API REQUEST START ===');
@@ -351,7 +705,7 @@ app.post('/api/chat', async (req, res) => {
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
     try {
-        const { message } = req.body;
+        const { message, useRAG = true, includeWebsiteContent = true } = req.body;
         
         if (!message) {
             console.log('ERROR: Missing message in request body');
@@ -368,9 +722,10 @@ app.post('/api/chat', async (req, res) => {
         console.log('Model Configuration:');
         console.log('- Use Local Model:', useLocalModel);
         console.log('- Local Model Name:', localModelName);
-        console.log('- Model Loading:', modelLoading);
-        console.log('- Model Loaded:', !!localModel);
-        console.log('- Model Error:', modelError);
+        console.log('- Use RAG:', useRAG);
+        console.log('- Include Website Content:', includeWebsiteContent);
+        console.log('- Documents Available:', documentStore.length);
+        console.log('- Website Pages:', documentEmbeddings.filter(d => d.type === 'website').length);
 
         if (useLocalModel) {
             // Initialize model if not already loaded
@@ -384,6 +739,23 @@ app.post('/api/chat', async (req, res) => {
                         troubleshooting: 'Check server logs and ensure the model name is valid'
                     });
                 }
+            }
+            
+            // Auto-crawl website if no website content and includeWebsiteContent is true
+            if (includeWebsiteContent && useRAG) {
+                const websiteChunks = documentEmbeddings.filter(d => d.type === 'website');
+                if (websiteChunks.length === 0 && !websiteCrawlData.crawlInProgress) {
+                    console.log('No website content found, triggering auto-crawl...');
+                    // Don't wait for crawl to complete, just trigger it
+                    crawlAndIndexWebsite().catch(error => {
+                        console.error('Auto-crawl failed:', error);
+                    });
+                }
+            }
+            
+            // Initialize embedder for RAG if needed
+            if (useRAG && !embedder) {
+                await initializeEmbedder();
             }
             
             // Wait for model to finish loading if it's currently loading
@@ -406,12 +778,17 @@ app.post('/api/chat', async (req, res) => {
                 });
             }
             
-            // Generate response using local model
+            // Generate response using local model with RAG
             if (localModel) {
-                console.log('Generating response with local model...');
+                console.log('Generating response with local model and RAG...');
                 
                 try {
-                    const aiResponse = await generateLocalResponse(message, localModelName);
+                    const aiResponse = await generateLocalResponseWithRAG(
+                        message, 
+                        localModelName, 
+                        useRAG,
+                        includeWebsiteContent
+                    );
                     const duration = Date.now() - startTime;
                     
                     console.log('SUCCESS: Local model response generated');
@@ -427,12 +804,16 @@ app.post('/api/chat', async (req, res) => {
                             modelType: 'local-transformers',
                             timestamp: new Date().toISOString(),
                             source: 'server-side-local',
+                            ragEnabled: useRAG,
+                            websiteContentIncluded: includeWebsiteContent,
+                            documentsCount: documentStore.length,
+                            websitePagesCount: documentEmbeddings.filter(d => d.type === 'website').length,
                             modelInfo: getLocalModelInfo(localModelName)
                         }
                     });
                     
                 } catch (error) {
-                    console.error('Error with local model:', error);
+                    console.error('Error with local model RAG:', error);
                     return res.status(500).json({
                         error: 'Local model inference failed',
                         details: error.message,
@@ -442,128 +823,10 @@ app.post('/api/chat', async (req, res) => {
             }
         }
 
-        // Fall back to existing Azure OpenAI logic
-        console.log('Using Azure OpenAI...');
-
-        // Check environment variables with detailed logging
-        const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-        const apiKey = process.env.AZURE_OPENAI_KEY;
-        const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-        
-        console.log('Environment Variables Check:');
-        console.log('- AZURE_OPENAI_ENDPOINT:', endpoint ? `${endpoint.substring(0, 20)}...` : 'NOT SET');
-        console.log('- AZURE_OPENAI_KEY:', apiKey ? `${apiKey.substring(0, 10)}...` : 'NOT SET');
-        console.log('- AZURE_OPENAI_DEPLOYMENT:', deployment || 'NOT SET');
-        
-        if (!endpoint || !apiKey || !deployment) {
-            const missing = [];
-            if (!endpoint) missing.push('AZURE_OPENAI_ENDPOINT');
-            if (!apiKey) missing.push('AZURE_OPENAI_KEY');
-            if (!deployment) missing.push('AZURE_OPENAI_DEPLOYMENT');
-            
-            return res.status(500).json({ 
-                error: 'Configuration Error: Missing environment variables',
-                details: `Missing: ${missing.join(', ')}`,
-                configHelp: 'Set the missing environment variables in your Azure Web App configuration'
-            });
-        }
-
-        // Determine model type and get appropriate settings
-        const isO1 = isO1Model(deployment);
-        const apiVersion = getApiVersion(deployment);
-        const messages = buildMessages(message, deployment);
-        const modelParams = getModelParameters(deployment);
-        
-        console.log('Model Analysis:');
-        console.log('- Deployment:', deployment);
-        console.log('- Is o1 Model:', isO1);
-        console.log('- API Version:', apiVersion);
-        console.log('- Message format:', JSON.stringify(messages, null, 2));
-        console.log('- Model parameters:', JSON.stringify(modelParams, null, 2));
-
-        // Build Azure OpenAI API URL
-        const azureUrl = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
-        console.log('Azure OpenAI URL:', azureUrl);
-
-        // Prepare request payload with model-specific parameters
-        const requestPayload = {
-            messages: messages,
-            ...modelParams
-        };
-        
-        console.log('Request payload:', JSON.stringify(requestPayload, null, 2));
-        console.log('Making request to Azure OpenAI...');
-
-        const response = await fetch(azureUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'api-key': apiKey
-            },
-            body: JSON.stringify(requestPayload)
-        });
-
-        console.log('Azure OpenAI Response Status:', response.status);
-        console.log('Azure OpenAI Response Headers:', Object.fromEntries(response.headers.entries()));
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.log('Azure OpenAI Error Response Body:', errorText);
-            
-            let errorDetails;
-            try {
-                errorDetails = JSON.parse(errorText);
-            } catch (e) {
-                errorDetails = { message: errorText };
-            }
-            
-            console.log('ERROR: Azure OpenAI API failed');
-            console.log('Status:', response.status);
-            console.log('Error details:', errorDetails);
-            
-            return res.status(500).json({ 
-                error: `Azure OpenAI API Error (${response.status})`,
-                details: errorDetails,
-                azureUrl: azureUrl.replace(apiKey, '***'),
-                modelInfo: {
-                    deployment: deployment,
-                    isO1Model: isO1,
-                    apiVersion: apiVersion
-                },
-                troubleshooting: getErrorTroubleshooting(response.status, errorDetails, isO1)
-            });
-        }
-
-        const data = await response.json();
-        console.log('Azure OpenAI Success Response:', JSON.stringify(data, null, 2));
-        
-        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-            console.log('ERROR: Unexpected response structure from Azure OpenAI');
-            return res.status(500).json({ 
-                error: 'Unexpected response structure from Azure OpenAI',
-                details: data,
-                troubleshooting: 'The API response did not contain the expected message structure'
-            });
-        }
-
-        const aiResponse = data.choices[0].message.content;
-        const duration = Date.now() - startTime;
-        
-        console.log('SUCCESS: Chat API completed');
-        console.log('Response length:', aiResponse.length);
-        console.log('Duration:', duration + 'ms');
-        console.log('=== CHAT API REQUEST END ===\n');
-
-        res.json({ 
-            response: aiResponse,
-            metadata: {
-                duration: duration,
-                model: deployment,
-                modelType: isO1 ? 'o1-series' : 'gpt-series',
-                timestamp: new Date().toISOString(),
-                usage: data.usage,
-                source: 'azure-openai'
-            }
+        // Fall back to Azure OpenAI (you can add this later)
+        return res.status(501).json({
+            error: 'Azure OpenAI not implemented in this version',
+            details: 'Please enable local models or implement Azure OpenAI fallback'
         });
 
     } catch (error) {
@@ -587,227 +850,281 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// Model management endpoints
-app.post('/api/model/initialize', async (req, res) => {
-    const { modelName } = req.body;
-    const targetModel = modelName || process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+// Website crawling endpoints
+app.post('/api/website/crawl', async (req, res) => {
+    console.log('\n=== WEBSITE CRAWL REQUEST ===');
     
-    console.log(`\n=== MODEL INITIALIZATION REQUEST ===`);
-    console.log('Target model:', targetModel);
-    
-    if (modelLoading) {
-        return res.status(409).json({
-            error: 'Model already loading',
-            details: 'A model is currently being initialized'
+    try {
+        const { 
+            baseUrl, 
+            maxPages = 20, 
+            respectRobots = true, 
+            includeExternalLinks = false,
+            crawlDelay = 1000 
+        } = req.body;
+        
+        if (!baseUrl) {
+            return res.status(400).json({
+                error: 'Base URL is required',
+                details: 'Please provide a baseUrl to crawl'
+            });
+        }
+        
+        if (websiteCrawlData.crawlInProgress) {
+            return res.status(409).json({
+                error: 'Crawl already in progress',
+                details: 'Please wait for the current crawl to complete'
+            });
+        }
+        
+        // Validate URL
+        try {
+            new URL(baseUrl);
+        } catch (error) {
+            return res.status(400).json({
+                error: 'Invalid URL',
+                details: 'Please provide a valid HTTP(S) URL'
+            });
+        }
+        
+        // Start crawling (don't await - return immediately)
+        crawlAndIndexWebsite(baseUrl, {
+            maxPages,
+            respectRobots,
+            includeExternalLinks,
+            crawlDelay
+        }).catch(error => {
+            console.error('Website crawl failed:', error);
+            websiteCrawlData.crawlInProgress = false;
+        });
+        
+        res.json({
+            success: true,
+            message: 'Website crawl started',
+            baseUrl: baseUrl,
+            options: { maxPages, respectRobots, includeExternalLinks, crawlDelay },
+            status: 'in-progress'
+        });
+        
+    } catch (error) {
+        console.error('Website crawl request error:', error);
+        res.status(500).json({
+            error: 'Failed to start website crawl',
+            details: error.message
         });
     }
-    
-    const success = await initializeLocalModel(targetModel);
+});
+
+// Auto-crawl current website (existing POST endpoint)
+app.post('/api/website/auto-crawl', async (req, res) => {
+    try {
+        const baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+        
+        // Start auto-crawl
+        crawlAndIndexWebsite(baseUrl, {
+            maxPages: 20,
+            respectRobots: false, // Skip robots.txt for own site
+            includeExternalLinks: false,
+            crawlDelay: 500 // Faster for local crawling
+        }).catch(error => {
+            console.error('Auto-crawl failed:', error);
+        });
+        
+        res.json({
+            success: true,
+            message: 'Auto-crawl started for current website',
+            baseUrl: baseUrl
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            error: 'Failed to start auto-crawl',
+            details: error.message
+        });
+    }
+});
+
+// Add GET endpoint for browser access
+app.get('/api/website/auto-crawl', async (req, res) => {
+    try {
+        const baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+        
+        // Check if crawl is already in progress
+        if (websiteCrawlData.crawlInProgress) {
+            return res.json({
+                success: false,
+                message: 'Auto-crawl already in progress',
+                status: 'in-progress',
+                baseUrl: baseUrl,
+                crawledPages: websiteCrawlData.crawledPages
+            });
+        }
+        
+        // Start auto-crawl
+        crawlAndIndexWebsite(baseUrl, {
+            maxPages: 20,
+            respectRobots: false, // Skip robots.txt for own site
+            includeExternalLinks: false,
+            crawlDelay: 500 // Faster for local crawling
+        }).catch(error => {
+            console.error('Auto-crawl failed:', error);
+        });
+        
+        res.json({
+            success: true,
+            message: 'Auto-crawl started for current website',
+            baseUrl: baseUrl,
+            tip: 'Check status at /api/website/status'
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            error: 'Failed to start auto-crawl',
+            details: error.message
+        });
+    }
+});
+
+// Get website crawl status
+app.get('/api/website/status', (req, res) => {
+    res.json({
+        crawl: websiteCrawlData,
+        websiteContent: {
+            pages: documentEmbeddings.filter(d => d.type === 'website').length > 0 ? 
+                   [...new Set(documentEmbeddings.filter(d => d.type === 'website').map(d => d.url))].length : 0,
+            chunks: documentEmbeddings.filter(d => d.type === 'website').length
+        },
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    const config = {
+        useLocalModel: process.env.USE_LOCAL_MODEL === 'true',
+        localModelName: process.env.LOCAL_MODEL_NAME || 'distilgpt2',
+        nodeVersion: process.version,
+        platform: process.platform
+    };
     
     res.json({
-        success: success,
-        model: targetModel,
-        status: success ? 'loaded' : 'failed',
-        error: modelError,
+        status: 'ok',
         timestamp: new Date().toISOString(),
-        modelInfo: success ? getLocalModelInfo(targetModel) : null
+        config,
+        models: {
+            localModel: !!localModel,
+            modelLoading,
+            modelError,
+            embedder: !!embedder
+        },
+        rag: {
+            documents: documentStore.length,
+            chunks: documentEmbeddings.length,
+            websitePages: documentEmbeddings.filter(d => d.type === 'website').length
+        }
     });
+});
+
+// Debug environment endpoint
+app.get('/api/debug/env', (req, res) => {
+    const debugInfo = {
+        USE_LOCAL_MODEL: process.env.USE_LOCAL_MODEL || 'not set',
+        LOCAL_MODEL_NAME: process.env.LOCAL_MODEL_NAME || 'not set',
+        NODE_ENV: process.env.NODE_ENV || 'not set',
+        PORT: process.env.PORT || 'not set',
+        NODE_VERSION: process.version,
+        PLATFORM: process.platform,
+        MEMORY_USAGE: process.memoryUsage()
+    };
+    
+    res.json(debugInfo);
+});
+
+// Model management endpoints
+app.post('/api/model/initialize', async (req, res) => {
+    try {
+        const { modelName } = req.body;
+        const targetModel = modelName || process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+        
+        console.log(`Manual model initialization requested: ${targetModel}`);
+        
+        const success = await initializeLocalModel(targetModel);
+        
+        if (success) {
+            res.json({
+                success: true,
+                message: `Model ${targetModel} initialized successfully`,
+                model: targetModel,
+                info: getLocalModelInfo(targetModel)
+            });
+        } else {
+            res.status(500).json({
+                success: false,
+                error: 'Model initialization failed',
+                details: modelError
+            });
+        }
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Model initialization error',
+            details: error.message
+        });
+    }
 });
 
 app.get('/api/model/status', (req, res) => {
-    const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
-    const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
-    const modelInfo = getLocalModelInfo(localModelName);
+    const modelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
     
     res.json({
-        configuration: {
-            useLocal: useLocalModel,
-            modelName: localModelName
-        },
-        model: localModelName,
-        modelInfo: modelInfo,
-        status: {
+        model: {
+            name: modelName,
             loaded: !!localModel,
             loading: modelLoading,
             error: modelError,
-            pipelineReady: !!pipeline
+            info: getLocalModelInfo(modelName)
         },
-        availableModels: [
-            'distilgpt2',
-            'gpt2', 
-            'distilbert-sentiment',
-            'bert-qa',
-            'flan-t5-small'
-        ],
+        embedder: {
+            loaded: !!embedder,
+            status: embedder ? 'ready' : 'not initialized'
+        },
+        memory: process.memoryUsage(),
         timestamp: new Date().toISOString()
     });
 });
 
-app.get('/api/system/memory', (req, res) => {
-    const usage = process.memoryUsage();
-    res.json({
-        memory: {
-            rss: `${Math.round(usage.rss / 1024 / 1024)} MB`,
-            heapTotal: `${Math.round(usage.heapTotal / 1024 / 1024)} MB`,
-            heapUsed: `${Math.round(usage.heapUsed / 1024 / 1024)} MB`,
-            external: `${Math.round(usage.external / 1024 / 1024)} MB`
-        },
-        timestamp: new Date().toISOString()
-    });
+// Test model download endpoint
+app.post('/api/model/test-download', async (req, res) => {
+    const { modelName } = req.body;
+    const testModel = modelName || 'Xenova/LaMini-Flan-T5-248M';
+    
+    try {
+        console.log(`Testing download for model: ${testModel}`);
+        
+        // Try to load just the tokenizer first (faster test)
+        const { AutoTokenizer } = await import('@xenova/transformers');
+        const tokenizer = await AutoTokenizer.from_pretrained(testModel);
+        
+        res.json({
+            success: true,
+            message: `Model ${testModel} is accessible`,
+            modelName: testModel,
+            tokenizerReady: !!tokenizer
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: 'Model download test failed',
+            modelName: testModel,
+            details: error.message
+        });
+    }
 });
 
-// Enhanced health check endpoint
-app.get('/api/health', (req, res) => {
-    console.log('\n=== HEALTH CHECK REQUEST ===');
-    
-    const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
-    const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
-    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-    const isO1 = deployment ? isO1Model(deployment) : false;
-    const apiVersion = deployment ? getApiVersion(deployment) : null;
-    
-    // Azure configuration check
-    const azureConfig = {
-        endpoint: {
-            set: !!process.env.AZURE_OPENAI_ENDPOINT,
-            value: process.env.AZURE_OPENAI_ENDPOINT ? 
-                   `${process.env.AZURE_OPENAI_ENDPOINT.substring(0, 30)}...` : 
-                   null
-        },
-        apiKey: {
-            set: !!process.env.AZURE_OPENAI_KEY,
-            length: process.env.AZURE_OPENAI_KEY ? process.env.AZURE_OPENAI_KEY.length : 0
-        },
-        deployment: {
-            set: !!deployment,
-            value: deployment || null,
-            isO1Model: isO1,
-            recommendedApiVersion: apiVersion
-        },
-        apiVersion: process.env.AZURE_OPENAI_VERSION || 'auto-detected'
-    };
-    
-    // Local model status
-    const localModelStatus = {
-        enabled: useLocalModel,
-        modelName: localModelName,
-        loaded: !!localModel,
-        loading: modelLoading,
-        error: modelError,
-        pipelineReady: !!pipeline,
-        modelInfo: useLocalModel ? getLocalModelInfo(localModelName) : null
-    };
-    
-    const azureConfigured = azureConfig.endpoint.set && azureConfig.apiKey.set && azureConfig.deployment.set;
-    const localConfigured = useLocalModel ? (!!localModel && !modelError) : true;
-    
-    const overallStatus = (useLocalModel ? localConfigured : azureConfigured) ? 'ok' : 'misconfigured';
-    
-    console.log('Health check - Mode:', useLocalModel ? 'local' : 'azure');
-    console.log('Health check - Azure config:', JSON.stringify(azureConfig, null, 2));
-    console.log('Health check - Local model:', JSON.stringify(localModelStatus, null, 2));
-    console.log('Overall status:', overallStatus);
-    console.log('=== HEALTH CHECK END ===\n');
-    
-    res.json({ 
-        status: overallStatus,
-        timestamp: new Date().toISOString(),
-        mode: useLocalModel ? 'local' : 'azure',
-        azure: azureConfig,
-        localModel: localModelStatus,
-        modelInfo: useLocalModel ? {
-            model: localModelName,
-            type: 'local-transformers',
-            supportedFeatures: ['text-generation', 'sentiment-analysis', 'question-answering'],
-            memoryUsage: process.memoryUsage()
-        } : {
-            deployment: deployment,
-            type: isO1 ? 'o1-series' : 'gpt-series',
-            supportedRoles: isO1 ? ['user', 'assistant'] : ['system', 'user', 'assistant'],
-            supportedParameters: isO1 ? 
-                ['max_completion_tokens'] : 
-                ['max_tokens', 'temperature', 'top_p', 'frequency_penalty', 'presence_penalty']
-        },
-        environment: {
-            nodeVersion: process.version,
-            platform: process.platform,
-            uptime: process.uptime()
-        },
-        recommendations: useLocalModel ? 
-            (!localModel ? ['Initialize the local model via POST /api/model/initialize'] : []) :
-            [
-                !azureConfig.endpoint.set && 'Set AZURE_OPENAI_ENDPOINT',
-                !azureConfig.apiKey.set && 'Set AZURE_OPENAI_KEY',
-                !azureConfig.deployment.set && 'Set AZURE_OPENAI_DEPLOYMENT'
-            ].filter(Boolean)
-    });
-});
-
-// Debug endpoint to test environment variables
-app.get('/api/debug/env', (req, res) => {
-    console.log('\n=== DEBUG ENV REQUEST ===');
-    console.log('All environment variables:');
-    
-    const envVars = {};
-    Object.keys(process.env).forEach(key => {
-        if (key.includes('AZURE') || key.includes('OPENAI') || key.includes('LOCAL') || key.includes('USE_LOCAL')) {
-            envVars[key] = process.env[key] ? 
-                          (key.includes('KEY') ? `${process.env[key].substring(0, 10)}...` : process.env[key]) : 
-                          'NOT SET';
-        }
-    });
-    
-    console.log('Azure/OpenAI/Local related env vars:', envVars);
-    console.log('=== DEBUG ENV END ===\n');
-    
-    res.json({
-        configVars: envVars,
-        localModelStatus: {
-            pipelineReady: !!pipeline,
-            modelLoaded: !!localModel,
-            modelLoading: modelLoading,
-            modelError: modelError
-        },
-        totalEnvVars: Object.keys(process.env).length,
-        timestamp: new Date().toISOString()
-    });
-});
-
-// Error troubleshooting helper with o1 model awareness
-function getErrorTroubleshooting(status, errorDetails, isO1Model) {
-    const troubleshooting = {
-        400: isO1Model ? 
-             'o1 models have different requirements: no system role, use max_completion_tokens instead of max_tokens' :
-             'Check your request parameters - invalid model parameters or message format',
-        401: 'Check your AZURE_OPENAI_KEY - it may be invalid or expired',
-        403: 'Check your Azure OpenAI resource permissions and subscription status',
-        404: 'Check your AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT - they may be incorrect',
-        429: 'Rate limit exceeded - wait a moment and try again',
-        500: 'Azure OpenAI service error - check Azure service status'
-    };
-    
-    return troubleshooting[status] || 'Check your Azure OpenAI configuration in the Azure Portal';
-}
-
-// Serve the main page
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-// Global error handler
-app.use((error, req, res, next) => {
-    console.log('\n!!! GLOBAL ERROR HANDLER !!!');
-    console.log('Error:', error);
-    console.log('Request URL:', req.url);
-    console.log('Request Method:', req.method);
-    console.log('=== GLOBAL ERROR END ===\n');
-    
-    res.status(500).json({
-        error: 'Unexpected server error',
-        details: error.message,
-        timestamp: new Date().toISOString()
-    });
-});
+// Create uploads directory if it doesn't exist
+const uploadsDir = path.join(__dirname, 'uploads');
+fs.mkdir(uploadsDir, { recursive: true }).catch(console.error);
 
 const port = process.env.PORT || 3000;
 app.listen(port, () => {
@@ -817,7 +1134,7 @@ app.listen(port, () => {
     console.log(`Health check: http://localhost:${port}/api/health`);
     console.log(`Environment debug: http://localhost:${port}/api/debug/env`);
     console.log(`Model status: http://localhost:${port}/api/model/status`);
-    console.log(`Memory usage: http://localhost:${port}/api/system/memory`);
+    console.log(`Website crawl: http://localhost:${port}/api/website/status`);
     console.log(`Node version: ${process.version}`);
     console.log(`Platform: ${process.platform}`);
     console.log('========================\n');
