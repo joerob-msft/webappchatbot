@@ -213,7 +213,7 @@
                 
                 <h4>Quick Links</h4>
                 <div class="quick-links">
-                    <a href="/api/health" target="_blank" class="button secondary">API Health Check</a>
+                    <a href="/api/debug/health" target="_blank" class="button secondary">API Health Check</a>
                     <a href="/api/website/status" target="_blank" class="button secondary">Crawl Status API</a>
                     <a href="/api/model/status" target="_blank" class="button secondary">Model Status API</a>
                 </div>
@@ -391,7 +391,7 @@
 
         async function checkHealth() {
             try {
-                const response = await fetch('/api/health');
+                const response = await fetch('/api/debug/health');
                 const health = await response.json();
                 
                 const healthHtml = `
@@ -524,7 +524,7 @@
             try {
                 updateStatus('Testing Azure OpenAI connection...', 'loading');
                 
-                const response = await fetch('/api/azure-openai/test', {
+                const response = await fetch('/api/model/azure-openai/test', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ message: testMessage })
@@ -557,7 +557,7 @@
         async function checkAzureConfig() {
             try {
                 // First check health endpoint
-                const healthResponse = await fetch('/api/health');
+                const healthResponse = await fetch('/api/debug/health');
                 const health = await healthResponse.json();
                 
                 // Then check detailed config

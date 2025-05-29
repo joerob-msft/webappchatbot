@@ -34,7 +34,7 @@ configureMulter(app);
 app.use('/api/chat', chatRoutes);
 app.use('/api/website', websiteRoutes);
 app.use('/api/model', modelRoutes);
-app.use('/api', debugRoutes);
+app.use('/api/debug', debugRoutes); 
 
 // Create uploads directory
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -45,7 +45,7 @@ app.listen(port, () => {
     console.log('\n🚀 SERVER STARTING 🚀');
     console.log(`Timestamp: ${new Date().toISOString()}`);
     console.log(`Server running on port: ${port}`);
-    console.log(`Health check: http://localhost:${port}/api/health`);
+    console.log(`Health check: http://localhost:${port}/api/debug/health`);
     console.log(`Environment debug: http://localhost:${port}/api/debug/env`);
     console.log(`Model status: http://localhost:${port}/api/model/status`);
     console.log(`Website crawl: http://localhost:${port}/api/website/status`);

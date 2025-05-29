@@ -237,7 +237,7 @@
             <div class="knowledge-links">
                 <a href="/dogs-qa.html" target="_blank">🐕 Dogs & Breeds Guide</a>
                 <a href="/admin.html" class="admin-link">⚙️ Admin Panel</a>
-                <a href="/api/health" target="_blank" class="admin-link">🏥 System Health</a>
+                <a href="/api/debug/health" target="_blank" class="admin-link">🏥 System Health</a>
             </div>
             <p><small>💡 Tip: The chatbot can answer questions based on the content from these pages! Use the admin panel to manage crawling and models.</small></p>
         </div>
@@ -255,7 +255,7 @@
 
         async function checkServerHealth() {
             try {
-                const response = await fetch('/api/health');
+                const response = await fetch('/api/debug/health');
                 const data = await response.json();
                 
                 updateDebugInfo(data);

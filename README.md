@@ -176,7 +176,7 @@ npm start
 - **Main Chat Interface**: http://localhost:3000
 - **Admin Panel**: http://localhost:3000/admin.html
 - **Knowledge Base**: http://localhost:3000/dogs-qa.html
-- **Health Check**: http://localhost:3000/api/health
+- **Health Check**: http://localhost:3000/api/debug/health
 - **Model Status**: http://localhost:3000/api/model/status
 - **Website Crawl Status**: http://localhost:3000/api/website/status
 - **Debug Environment**: http://localhost:3000/api/debug/env
@@ -234,7 +234,7 @@ Fine-tune RAG behavior through environment variables or admin panel:
 
 ```bash
 # Check RAG status
-curl http://localhost:3000/api/health
+curl http://localhost:3000/api/debug/health
 
 # View website crawl status
 curl http://localhost:3000/api/website/status
@@ -303,7 +303,7 @@ Use the comprehensive admin panel at `/admin.html` for:
 - `GET /api/website/status` - Check crawl status and statistics
 
 ### Monitoring & Debug
-- `GET /api/health` - Comprehensive health check
+- `GET /api/debug/health` - Comprehensive health check
 - `GET /api/debug/env` - Environment variables (masked)
 - `GET /api/system/memory` - Memory usage statistics (via debug/env)
 
@@ -426,7 +426,7 @@ curl http://localhost:3000/api/website/status
    - Restart application to clear memory
 
 3. **RAG not working**
-   - Ensure embedder is initialized: `GET /api/health`
+   - Ensure embedder is initialized: `GET /api/debug/health`
    - Check if documents are uploaded/crawled
    - Verify `useRAG: true` in chat requests
 
@@ -470,7 +470,7 @@ curl http://localhost:3000/api/website/status
 ### Health Monitoring
 ```bash
 # Comprehensive health check
-curl http://localhost:3000/api/health
+curl http://localhost:3000/api/debug/health
 
 # Returns:
 {
@@ -563,7 +563,7 @@ The admin panel provides:
 - **Performance Monitoring**: Resource usage and response time tracking
 
 ### Debug Endpoints
-- `/api/health` - Comprehensive system health
+- `/api/debug/health` - Comprehensive system health
 - `/api/debug/env` - Environment and memory information
 - `/api/model/status` - Model status and configuration
 - `/api/website/status` - Crawling status and statistics
@@ -604,7 +604,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ```bash
 # Complete system health check
-curl http://localhost:3000/api/health
+curl http://localhost:3000/api/debug/health
 
 # Model status and memory usage
 curl http://localhost:3000/api/model/status
