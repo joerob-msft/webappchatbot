@@ -556,19 +556,36 @@
 
         async function checkAzureConfig() {
             try {
-                const response = await fetch('/api/health');
-                const health = await response.json();
+                // First check health endpoint
+                const healthResponse = await fetch('/api/health');
+                const health = await healthResponse.json();
+                
+                // Then check detailed config
+                const configResponse = await fetch('/api/debug/azure-config');
+                const config = await configResponse.json();
                 
                 const configHtml = `
                     <h4>🌐 Azure OpenAI Configuration</h4>
-                    <strong>Configured:</strong> ${health.config.azureOpenAIConfigured ? '✅ Yes' : '❌ No'}<br>
-                    <strong>Deployment:</strong> ${health.config.azureOpenAIDeployment}<br>
-                    <strong>Client Ready:</strong> ${health.models.azureOpenAI ? '✅ Yes' : '❌ No'}<br>
-                    <strong>Use Local Model:</strong> ${health.config.useLocalModel ? 'Yes' : 'No'}
+                    <strong>Environment Variables:</strong><br>
+                    • Endpoint: ${config.endpoint}<br>
+                    • API Key: ${config.key}<br>
+                    • Deployment: ${config.deployment}<br>
+                    • Version: ${config.version}<br>
+                    <br>
+                    <strong>Status:</strong><br>
+                    • All Configured: ${config.configStatus.allConfigured ? '✅ Yes' : '❌ No'}<br>
+                    • Client Initialized: ${config.clientInitialized ? '✅ Yes' : '❌ No'}<br>
+                    • Use Local Model: ${config.useLocalModel}<br>
+                    <br>
+                    <strong>Health Check:</strong><br>
+                    • Azure OpenAI Ready: ${health.models.azureOpenAI ? '✅ Yes' : '❌ No'}<br>
+                    <strong>Timestamp:</strong> ${new Date(config.timestamp).toLocaleString()}
                 `;
                 
                 document.getElementById('azureOpenAIStatus').innerHTML = configHtml;
-                document.getElementById('azureOpenAIStatus').className = health.config.azureOpenAIConfigured ? 'status-box success' : 'status-box error';
+                
+                const isFullyWorking = config.configStatus.allConfigured && health.models.azureOpenAI;
+                document.getElementById('azureOpenAIStatus').className = isFullyWorking ? 'status-box success' : 'status-box error';
                 
             } catch (error) {
                 document.getElementById('azureOpenAIStatus').innerHTML = `❌ Error checking configuration: ${error.message}`;

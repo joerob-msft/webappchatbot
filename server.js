@@ -1304,7 +1304,7 @@ app.get('/api/health', (req, res) => {
     const config = {
         useLocalModel: process.env.USE_LOCAL_MODEL === 'true',
         localModelName: process.env.LOCAL_MODEL_NAME || 'distilgpt2',
-        azureOpenAIConfigured: !!(process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY),
+        azureOpenAIConfigured: !!(process.env.AZURE_OPENAI_ENDPOINT && process.env.AZURE_OPENAI_KEY && process.env.AZURE_OPENAI_DEPLOYMENT),
         azureOpenAIDeployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'not set',
         nodeVersion: process.version,
         platform: process.platform
@@ -1319,7 +1319,7 @@ app.get('/api/health', (req, res) => {
             modelLoading,
             modelError,
             embedder: !!embedder,
-            azureOpenAI: !!azureOpenAIClient
+            azureOpenAI: !!azureOpenAIClient  // This is what the admin panel is checking
         },
         rag: {
             documents: documentStore.length,
@@ -1344,7 +1344,7 @@ app.get('/api/debug/env', (req, res) => {
     res.json(debugInfo);
 });
 
-// Add this debug endpoint to check Azure OpenAI configuration
+// Add this debug endpoint after your existing endpoints:
 app.get('/api/debug/azure-config', (req, res) => {
     res.json({
         endpoint: process.env.AZURE_OPENAI_ENDPOINT ? 'SET' : 'NOT SET',
@@ -1353,6 +1353,7 @@ app.get('/api/debug/azure-config', (req, res) => {
         deployment: process.env.AZURE_OPENAI_DEPLOYMENT || 'NOT SET',
         version: process.env.AZURE_OPENAI_VERSION || 'NOT SET',
         useLocalModel: process.env.USE_LOCAL_MODEL,
+        clientInitialized: !!azureOpenAIClient,
         allEnvKeys: Object.keys(process.env).filter(key => key.includes('AZURE')).sort(),
         configStatus: {
             hasEndpoint: !!process.env.AZURE_OPENAI_ENDPOINT,
@@ -1548,3 +1549,25 @@ app.listen(port, () => {
     console.log(`Platform: ${process.platform}`);
     console.log('========================\n');
 });
+
+// Initialize Azure OpenAI client on startup if configured and not using local model
+async function initializeServicesOnStartup() {
+    const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
+    
+    if (!useLocalModel) {
+        console.log('Initializing Azure OpenAI client on startup...');
+        try {
+            azureOpenAIClient = initializeAzureOpenAI();
+            if (azureOpenAIClient) {
+                console.log('✅ Azure OpenAI client ready');
+            } else {
+                console.log('⚠️ Azure OpenAI client initialization failed');
+            }
+        } catch (error) {
+            console.error('❌ Azure OpenAI startup error:', error);
+        }
+    }
+}
+
+// Add this before your server.listen():
+initializeServicesOnStartup();
