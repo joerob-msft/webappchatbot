@@ -5,6 +5,12 @@ const { getAzureOpenAIClient } = require('../models/azureOpenAI');
 const { getDocumentStore, getDocumentEmbeddings, getEmbedder } = require('../services/ragService');
 const { detectBaseUrl } = require('../utils/urlUtils');
 
+// Add this to the top of your debug routes to ensure proper error handling
+router.use((req, res, next) => {
+    res.setHeader('Content-Type', 'application/json');
+    next();
+});
+
 // Health check endpoint
 router.get('/health', (req, res) => {
     const localModel = getLocalModel();
@@ -43,19 +49,33 @@ router.get('/health', (req, res) => {
     });
 });
 
-// Debug environment endpoint
+// Update the /env route to be more robust
 router.get('/env', (req, res) => {
-    const debugInfo = {
-        USE_LOCAL_MODEL: process.env.USE_LOCAL_MODEL || 'not set',
-        LOCAL_MODEL_NAME: process.env.LOCAL_MODEL_NAME || 'not set',
-        NODE_ENV: process.env.NODE_ENV || 'not set',
-        PORT: process.env.PORT || 'not set',
-        NODE_VERSION: process.version,
-        PLATFORM: process.platform,
-        MEMORY_USAGE: process.memoryUsage()
-    };
-    
-    res.json(debugInfo);
+    try {
+        const debugInfo = {
+            USE_LOCAL_MODEL: process.env.USE_LOCAL_MODEL || 'not set',
+            LOCAL_MODEL_NAME: process.env.LOCAL_MODEL_NAME || 'not set',
+            NODE_ENV: process.env.NODE_ENV || 'not set',
+            PORT: process.env.PORT || 'not set',
+            NODE_VERSION: process.version,
+            PLATFORM: process.platform,
+            MEMORY_USAGE: process.memoryUsage(),
+            WEBSITE_AUTO_CRAWL: process.env.WEBSITE_AUTO_CRAWL || 'not set',
+            RAG_CHUNK_SIZE: process.env.RAG_CHUNK_SIZE || 'not set',
+            timestamp: new Date().toISOString()
+        };
+        
+        console.log('Returning environment debug info:', debugInfo);
+        res.json(debugInfo);
+        
+    } catch (error) {
+        console.error('Error in /env endpoint:', error);
+        res.status(500).json({
+            error: 'Failed to get environment info',
+            details: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 // Azure configuration debug endpoint

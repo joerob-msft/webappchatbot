@@ -180,6 +180,8 @@ npm start
 - **Model Status**: http://localhost:3000/api/model/status
 - **Website Crawl Status**: http://localhost:3000/api/website/status
 - **Debug Environment**: http://localhost:3000/api/debug/env
+- **Azure Config**: http://localhost:3000/api/debug/azure-config
+```
 
 ### 7. Initialize System (Automatic)
 The system will automatically:

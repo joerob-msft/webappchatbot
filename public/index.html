@@ -275,14 +275,82 @@
             }
         }
 
+        // Update any functions that call these endpoints
         async function checkEnvironment() {
             try {
-                const response = await fetch('/api/debug/env');
+                console.log('Checking environment configuration...');
+                
+                const response = await fetch('/api/debug/env', {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', response.headers.get('content-type'));
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Environment data:', data);
+                
+                // Display the environment info
+                alert('Environment check successful!\n\n' + 
+                      'Node.js: ' + data.NODE_VERSION + '\n' +
+                      'Platform: ' + data.PLATFORM + '\n' +
+                      'Use Local Model: ' + data.USE_LOCAL_MODEL + '\n' +
+                      'Local Model: ' + data.LOCAL_MODEL_NAME);
+                
+            } catch (error) {
+                console.error('Environment check failed:', error);
+                alert('Environment check failed: ' + error.message);
+            }
+        }
+
+        async function checkAzureConfig() {
+            try {
+                const response = await fetch('/api/debug/azure-config');
+                const data = await response.json();
+                console.log('Azure config:', data);
+                
+                alert('Azure config check completed!\n\n' +
+                      'Environment: ' + (data.environment.isAzureAppService ? 'Azure App Service' : 'Local') + '\n' +
+                      'Endpoint: ' + data.azureOpenAI.endpoint + '\n' +
+                      'API Key: ' + data.azureOpenAI.key + '\n' +
+                      'Deployment: ' + data.azureOpenAI.deployment);
+                      
+            } catch (error) {
+                console.error('Error checking Azure config:', error);
+                alert('Error checking Azure config: ' + error.message);
+            }
+        }
+
+        async function testAzureOpenAI() {
+            try {
+                const response = await fetch('/api/model/azure-openai/test', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: 'Hello, this is a test message.'
+                    })
+                });
+                
                 const data = await response.json();
                 
-                addMessage(`Environment Variables Debug:\n${JSON.stringify(data, null, 2)}`, false, true);
+                if (data.success) {
+                    alert('✅ Azure OpenAI test successful!\n\nResponse: ' + data.testResponse);
+                } else {
+                    alert('❌ Azure OpenAI test failed: ' + data.error + '\nDetails: ' + data.details);
+                }
             } catch (error) {
-                addMessage(`Environment check failed: ${error.message}`, false, true);
+                console.error('Error testing Azure OpenAI:', error);
+                alert('❌ Error testing Azure OpenAI: ' + error.message);
             }
         }
 
