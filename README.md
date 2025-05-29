@@ -1,6 +1,6 @@
 # Advanced AI Chatbot with RAG, Local Models & Azure OpenAI
 
-A powerful web-based chatbot that supports both Azure OpenAI Service and local AI models, featuring RAG (Retrieval-Augmented Generation), website crawling, document upload, and intelligent content indexing. Built with Node.js and Express.
+A powerful web-based chatbot that supports both Azure OpenAI Service and local AI models, featuring RAG (Retrieval-Augmented Generation), website crawling, document upload, and intelligent content indexing. Built with Node.js and Express with a modern modular architecture.
 
 ## 🚀 Features
 
@@ -27,6 +27,7 @@ A powerful web-based chatbot that supports both Azure OpenAI Service and local A
 - **Health Monitoring**: Comprehensive health check and monitoring endpoints
 - **Memory Tracking**: Monitor resource usage for local models
 - **Model Testing**: Built-in model availability testing
+- **Modular Architecture**: Clean, maintainable code structure with separate modules
 
 ### Deployment Ready
 - **Azure Deployment**: Configured for Azure Web Apps with GitHub Actions CI/CD
@@ -181,7 +182,7 @@ npm start
 - **Website Crawl Status**: http://localhost:3000/api/website/status
 - **Debug Environment**: http://localhost:3000/api/debug/env
 - **Azure Config**: http://localhost:3000/api/debug/azure-config
-```
+- **URL Detection**: http://localhost:3000/api/debug/url-detection
 
 ### 7. Initialize System (Automatic)
 The system will automatically:
@@ -292,11 +293,12 @@ Use the comprehensive admin panel at `/admin.html` for:
 - `POST /api/model/initialize` - Initialize/switch local model
 - `GET /api/model/status` - Check model status and configuration
 - `POST /api/model/test-download` - Test model availability
+- `POST /api/model/azure-openai/test` - Test Azure OpenAI connection
 
 ### Document Management
-- `POST /api/upload` - Upload documents for RAG (configured but not shown in current code)
-- `GET /api/documents` - List uploaded documents (configured but not shown in current code)
-- `DELETE /api/documents/:id` - Remove document (configured but not shown in current code)
+- `POST /api/upload` - Upload documents for RAG (configurable via multer)
+- `GET /api/documents` - List uploaded documents (extendable)
+- `DELETE /api/documents/:id` - Remove document (extendable)
 
 ### Website Crawling
 - `POST /api/website/crawl` - Crawl external website
@@ -307,7 +309,8 @@ Use the comprehensive admin panel at `/admin.html` for:
 ### Monitoring & Debug
 - `GET /api/debug/health` - Comprehensive health check
 - `GET /api/debug/env` - Environment variables (masked)
-- `GET /api/system/memory` - Memory usage statistics (via debug/env)
+- `GET /api/debug/azure-config` - Azure OpenAI configuration debug
+- `GET /api/debug/url-detection` - URL detection and environment debug
 
 ## 🖥️ Admin Panel Features
 
@@ -323,6 +326,7 @@ Access the full-featured admin panel at `/admin.html`:
 - **Model Switching**: Change local models without restart
 - **Status Monitoring**: Real-time model status and memory usage
 - **Model Testing**: Test model availability and downloads
+- **Azure OpenAI Testing**: Test Azure OpenAI connectivity and responses
 - **Performance Metrics**: Monitor inference speed and resource usage
 
 ### System Monitoring
@@ -394,6 +398,11 @@ curl http://localhost:3000/api/model/status
 curl -X POST http://localhost:3000/api/model/test-download \
   -H "Content-Type: application/json" \
   -d '{"modelName": "Xenova/distilgpt2"}'
+
+# Test Azure OpenAI
+curl -X POST http://localhost:3000/api/model/azure-openai/test \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Test message"}'
 ```
 
 ### Website Crawling
@@ -450,6 +459,11 @@ curl http://localhost:3000/api/website/status
    - Check that `/admin.html` file exists in public directory
    - Verify no firewall blocking access
 
+7. **API Endpoints returning 404**
+   - Verify modular route structure is properly initialized
+   - Check server console for route mounting errors
+   - Use `/api/debug/health` to test basic connectivity
+
 ### Performance Optimization
 
 #### Local Models
@@ -479,7 +493,8 @@ curl http://localhost:3000/api/debug/health
   "status": "ok",
   "models": {
     "localModel": true,
-    "embedder": true
+    "embedder": true,
+    "azureOpenAI": true
   },
   "rag": {
     "documents": 5,
@@ -505,28 +520,66 @@ curl http://localhost:3000/api/website/status
 # Returns crawl progress and indexed content stats
 ```
 
+### Azure OpenAI Configuration Debug
+```bash
+# Check Azure OpenAI configuration
+curl http://localhost:3000/api/debug/azure-config
+
+# Returns detailed Azure configuration and status
+```
+
 ## 🗂️ Project Structure
 
 ```
 webappchatbot/
+├── 📁 config/
+│   ├── environment.js          # Environment configuration management
+│   └── multer.js              # File upload configuration
+├── 📁 models/
+│   ├── azureOpenAI.js         # Azure OpenAI client and response generation
+│   ├── localModels.js         # Local AI model management
+│   └── modelInfo.js           # Model configuration and metadata
+├── 📁 services/
+│   ├── crawling.js            # Website crawling functionality
+│   └── ragService.js          # RAG processing and embeddings
+├── 📁 routes/
+│   ├── chat.js                # Chat API endpoints
+│   ├── debug.js               # Debug and monitoring endpoints
+│   ├── models.js              # Model management endpoints
+│   └── website.js             # Website crawling endpoints
+├── 📁 utils/
+│   ├── logger.js              # Logging utilities
+│   ├── textUtils.js           # Text processing utilities
+│   └── urlUtils.js            # URL detection and validation
+├── 📁 middleware/
+│   └── requestLogger.js       # Request logging middleware
+├── 📁 startup/
+│   └── initialize.js          # Service initialization
 ├── 📁 public/
-│   ├── index.html              # Main chat interface with debug panel
-│   ├── admin.html              # Comprehensive admin panel
-│   └── dogs-qa.html            # Example knowledge base page
-├── 📁 uploads/                 # Uploaded documents (auto-created)
+│   ├── index.html             # Main chat interface with debug panel
+│   ├── admin.html             # Comprehensive admin panel
+│   └── dogs-qa.html           # Example knowledge base page
+├── 📁 uploads/                # Uploaded documents (auto-created)
 ├── 📁 .github/workflows/
 │   └── main_joerob-chatbot.yml # Azure deployment workflow
-├── 📄 server.js                # Main server with RAG, crawling, local models
-├── 📄 test-models.js           # Model testing utility
-├── 📄 package.json             # Dependencies including transformers
-├── 📄 .env                     # Environment configuration (not in git)
-├── 📄 .gitignore               # Git ignore rules
-├── 📄 web.config               # IIS configuration for Azure
-├── 📄 LICENSE                  # MIT license
-└── 📄 README.md                # This comprehensive guide
+├── 📄 server.js               # Main server entry point (modular)
+├── 📄 test-models.js          # Model testing utility
+├── 📄 package.json            # Dependencies including transformers
+├── 📄 .env                    # Environment configuration (not in git)
+├── 📄 .gitignore              # Git ignore rules
+├── 📄 web.config              # IIS configuration for Azure
+├── 📄 LICENSE                 # MIT license
+└── 📄 README.md               # This comprehensive guide
 ```
 
 ## 🔮 Advanced Features
+
+### Modular Architecture
+- **Separation of Concerns**: Each module has a single responsibility
+- **Maintainability**: Easy to update and extend individual components
+- **Testability**: Individual modules can be unit tested
+- **Scalability**: Easy to add new features without affecting existing code
+- **Error Isolation**: Issues in one module don't affect others
 
 ### Hybrid AI Approach
 - **Development**: Use local models for fast iteration
@@ -567,6 +620,8 @@ The admin panel provides:
 ### Debug Endpoints
 - `/api/debug/health` - Comprehensive system health
 - `/api/debug/env` - Environment and memory information
+- `/api/debug/azure-config` - Azure OpenAI configuration debug
+- `/api/debug/url-detection` - URL detection and environment debug
 - `/api/model/status` - Model status and configuration
 - `/api/website/status` - Crawling status and statistics
 
@@ -578,15 +633,18 @@ The admin panel provides:
 4. Test RAG functionality with sample documents
 5. Ensure memory usage is reasonable
 6. Test admin panel functionality
-7. Submit a pull request
+7. Verify modular structure remains clean
+8. Submit a pull request
 
 ### Development Guidelines
+- Follow the modular architecture patterns
 - Test with multiple model types using the admin panel
 - Verify RAG performance with various document types
 - Check memory usage with different configurations
 - Ensure admin panel functionality works correctly
 - Add appropriate error handling and logging
 - Update documentation for new features
+- Maintain separation of concerns in modules
 
 ## 📄 License
 
@@ -601,6 +659,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 3. **RAG Problems**: Check health endpoints and admin panel status
 4. **Performance Issues**: Monitor memory usage through admin panel
 5. **Deployment Issues**: Verify Azure configuration settings
+6. **Route Issues**: Check server console for module loading errors
 
 ### Useful Debug Commands
 
@@ -617,10 +676,21 @@ curl http://localhost:3000/api/website/status
 # Environment configuration
 curl http://localhost:3000/api/debug/env
 
+# Azure OpenAI configuration
+curl http://localhost:3000/api/debug/azure-config
+
+# URL detection debug
+curl http://localhost:3000/api/debug/url-detection
+
 # Test model switching
 curl -X POST http://localhost:3000/api/model/initialize \
   -H "Content-Type: application/json" \
   -d '{"modelName": "Xenova/distilgpt2"}'
+
+# Test Azure OpenAI connection
+curl -X POST http://localhost:3000/api/model/azure-openai/test \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Test message"}'
 ```
 
 ### Admin Panel Features
@@ -628,6 +698,8 @@ curl -X POST http://localhost:3000/api/model/initialize \
 - **Interactive Testing**: Test all functionality through the web interface
 - **Error Diagnostics**: Detailed error reporting and troubleshooting
 - **Performance Monitoring**: Resource usage and response time tracking
+- **Model Management**: Switch models and test configurations
+- **Debug Access**: Direct access to all debug endpoints
 
 ---
 
@@ -639,5 +711,6 @@ curl -X POST http://localhost:3000/api/model/initialize \
 - **Limited Memory**: Stick with `Xenova/distilgpt2` and optimize RAG settings
 - **Development**: Use local models with the admin panel for fast iteration
 - **Enterprise**: Combine local models with Azure OpenAI fallback
+- **Troubleshooting**: Use the comprehensive debug endpoints and admin panel
 
-This comprehensive chatbot solution provides enterprise-grade AI capabilities with an intuitive admin interface and the flexibility to run entirely local or leverage cloud services as needed.
+This comprehensive chatbot solution provides enterprise-grade AI capabilities with an intuitive admin interface, clean modular architecture, and the flexibility to run entirely local or leverage cloud services as needed.
