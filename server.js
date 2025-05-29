@@ -12,7 +12,115 @@ app.use((req, res, next) => {
     next();
 });
 
-// Chat API endpoint with comprehensive error handling
+function getModelInfo(deploymentName) {
+    const name = deploymentName.toLowerCase();
+    
+    // o1 Series Models
+    if (name.includes('o1-mini') || name.includes('o1-preview') || name.match(/^o1$/)) {
+        return {
+            series: 'o1',
+            type: 'reasoning',
+            supportsSystemRole: false,
+            tokenParam: 'max_completion_tokens',
+            supportsTemperature: false,
+            requiredApiVersion: '2024-12-01-preview',
+            maxTokens: 65536
+        };
+    }
+    
+    // GPT-4 Series
+    if (name.includes('gpt-4')) {
+        return {
+            series: 'gpt-4',
+            type: 'chat',
+            supportsSystemRole: true,
+            tokenParam: 'max_tokens',
+            supportsTemperature: true,
+            requiredApiVersion: '2024-08-01-preview',
+            maxTokens: name.includes('32k') ? 32768 : 
+                      name.includes('turbo') || name.includes('4o') ? 128000 : 8192
+        };
+    }
+    
+    // GPT-3.5 Series
+    if (name.includes('gpt-35') || name.includes('gpt-3.5')) {
+        return {
+            series: 'gpt-3.5',
+            type: 'chat',
+            supportsSystemRole: true,
+            tokenParam: 'max_tokens',
+            supportsTemperature: true,
+            requiredApiVersion: '2024-08-01-preview',
+            maxTokens: name.includes('16k') ? 16384 : 4096
+        };
+    }
+    
+    // Default for unknown models (assume GPT-like)
+    return {
+        series: 'unknown',
+        type: 'chat',
+        supportsSystemRole: true,
+        tokenParam: 'max_tokens',
+        supportsTemperature: true,
+        requiredApiVersion: '2024-08-01-preview',
+        maxTokens: 4096
+    };
+}
+
+function isO1Model(deploymentName) {
+    return getModelInfo(deploymentName).series === 'o1';
+}
+// Helper function to get appropriate API version for model
+function getApiVersion(deploymentName) {
+    const modelInfo = getModelInfo(deploymentName);
+    return process.env.AZURE_OPENAI_VERSION || modelInfo.requiredApiVersion;
+}
+
+// Helper function to build messages array based on model type
+function buildMessages(userMessage, deploymentName) {
+    const modelInfo = getModelInfo(deploymentName);
+    
+    if (modelInfo.supportsSystemRole) {
+        return [
+            {
+                role: 'system',
+                content: 'You are a helpful AI assistant.'
+            },
+            {
+                role: 'user',
+                content: userMessage
+            }
+        ];
+    } else {
+        return [
+            {
+                role: 'user',
+                content: userMessage
+            }
+        ];
+    }
+}
+
+// Helper function to get model-specific parameters
+function getModelParameters(deploymentName) {
+    const modelInfo = getModelInfo(deploymentName);
+    const baseParams = {};
+    
+    // Set token limit parameter
+    baseParams[modelInfo.tokenParam] = Math.min(1000, modelInfo.maxTokens);
+    
+    // Add temperature and other parameters if supported
+    if (modelInfo.supportsTemperature) {
+        baseParams.temperature = 0.7;
+        baseParams.top_p = 0.95;
+        baseParams.frequency_penalty = 0;
+        baseParams.presence_penalty = 0;
+    }
+    
+    return baseParams;
+}
+
+// Chat API endpoint with model-aware handling
 app.post('/api/chat', async (req, res) => {
     const startTime = Date.now();
     console.log('\n=== CHAT API REQUEST START ===');
@@ -34,62 +142,46 @@ app.post('/api/chat', async (req, res) => {
         const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
         const apiKey = process.env.AZURE_OPENAI_KEY;
         const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-        const apiVersion = process.env.AZURE_OPENAI_VERSION || '2024-08-01-preview';
         
         console.log('Environment Variables Check:');
         console.log('- AZURE_OPENAI_ENDPOINT:', endpoint ? `${endpoint.substring(0, 20)}...` : 'NOT SET');
         console.log('- AZURE_OPENAI_KEY:', apiKey ? `${apiKey.substring(0, 10)}...` : 'NOT SET');
         console.log('- AZURE_OPENAI_DEPLOYMENT:', deployment || 'NOT SET');
-        console.log('- AZURE_OPENAI_VERSION:', apiVersion);
         
-        if (!endpoint) {
-            console.log('ERROR: AZURE_OPENAI_ENDPOINT environment variable not set');
+        if (!endpoint || !apiKey || !deployment) {
+            const missing = [];
+            if (!endpoint) missing.push('AZURE_OPENAI_ENDPOINT');
+            if (!apiKey) missing.push('AZURE_OPENAI_KEY');
+            if (!deployment) missing.push('AZURE_OPENAI_DEPLOYMENT');
+            
             return res.status(500).json({ 
-                error: 'Configuration Error: Azure OpenAI endpoint not configured',
-                details: 'AZURE_OPENAI_ENDPOINT environment variable is missing',
-                configHelp: 'Set AZURE_OPENAI_ENDPOINT to your Azure OpenAI resource URL (e.g., https://your-resource.openai.azure.com)'
-            });
-        }
-        
-        if (!apiKey) {
-            console.log('ERROR: AZURE_OPENAI_KEY environment variable not set');
-            return res.status(500).json({ 
-                error: 'Configuration Error: Azure OpenAI API key not configured',
-                details: 'AZURE_OPENAI_KEY environment variable is missing',
-                configHelp: 'Set AZURE_OPENAI_KEY to your Azure OpenAI API key from the Azure Portal'
-            });
-        }
-        
-        if (!deployment) {
-            console.log('ERROR: AZURE_OPENAI_DEPLOYMENT environment variable not set');
-            return res.status(500).json({ 
-                error: 'Configuration Error: Azure OpenAI deployment not configured',
-                details: 'AZURE_OPENAI_DEPLOYMENT environment variable is missing',
-                configHelp: 'Set AZURE_OPENAI_DEPLOYMENT to your model deployment name (e.g., gpt-4o-mini)'
+                error: 'Configuration Error: Missing environment variables',
+                details: `Missing: ${missing.join(', ')}`,
+                configHelp: 'Set the missing environment variables in your Azure Web App configuration'
             });
         }
 
-        // Build and validate Azure OpenAI API URL
+        // Determine model type and get appropriate settings
+        const isO1 = isO1Model(deployment);
+        const apiVersion = getApiVersion(deployment);
+        const messages = buildMessages(message, deployment);
+        const modelParams = getModelParameters(deployment);
+        
+        console.log('Model Analysis:');
+        console.log('- Deployment:', deployment);
+        console.log('- Is o1 Model:', isO1);
+        console.log('- API Version:', apiVersion);
+        console.log('- Message format:', JSON.stringify(messages, null, 2));
+        console.log('- Model parameters:', JSON.stringify(modelParams, null, 2));
+
+        // Build Azure OpenAI API URL
         const azureUrl = `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
         console.log('Azure OpenAI URL:', azureUrl);
 
-        // Prepare request payload
+        // Prepare request payload with model-specific parameters
         const requestPayload = {
-            messages: [
-                {
-                    role: 'system',
-                    content: 'You are a helpful AI assistant.'
-                },
-                {
-                    role: 'user',
-                    content: message
-                }
-            ],
-            max_tokens: 1000,
-            temperature: 0.7,
-            top_p: 0.95,
-            frequency_penalty: 0,
-            presence_penalty: 0
+            messages: messages,
+            ...modelParams
         };
         
         console.log('Request payload:', JSON.stringify(requestPayload, null, 2));
@@ -126,7 +218,12 @@ app.post('/api/chat', async (req, res) => {
                 error: `Azure OpenAI API Error (${response.status})`,
                 details: errorDetails,
                 azureUrl: azureUrl.replace(apiKey, '***'),
-                troubleshooting: getErrorTroubleshooting(response.status, errorDetails)
+                modelInfo: {
+                    deployment: deployment,
+                    isO1Model: isO1,
+                    apiVersion: apiVersion
+                },
+                troubleshooting: getErrorTroubleshooting(response.status, errorDetails, isO1)
             });
         }
 
@@ -155,7 +252,9 @@ app.post('/api/chat', async (req, res) => {
             metadata: {
                 duration: duration,
                 model: deployment,
-                timestamp: new Date().toISOString()
+                modelType: isO1 ? 'o1-series' : 'gpt-series',
+                timestamp: new Date().toISOString(),
+                usage: data.usage
             }
         });
 
@@ -184,6 +283,10 @@ app.post('/api/chat', async (req, res) => {
 app.get('/api/health', (req, res) => {
     console.log('\n=== HEALTH CHECK REQUEST ===');
     
+    const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+    const isO1 = isO1Model(deployment);
+    const apiVersion = getApiVersion(deployment);
+    
     const config = {
         endpoint: {
             set: !!process.env.AZURE_OPENAI_ENDPOINT,
@@ -196,10 +299,12 @@ app.get('/api/health', (req, res) => {
             length: process.env.AZURE_OPENAI_KEY ? process.env.AZURE_OPENAI_KEY.length : 0
         },
         deployment: {
-            set: !!process.env.AZURE_OPENAI_DEPLOYMENT,
-            value: process.env.AZURE_OPENAI_DEPLOYMENT || null
+            set: !!deployment,
+            value: deployment || null,
+            isO1Model: isO1,
+            recommendedApiVersion: apiVersion
         },
-        apiVersion: process.env.AZURE_OPENAI_VERSION || '2024-08-01-preview'
+        apiVersion: process.env.AZURE_OPENAI_VERSION || 'auto-detected'
     };
     
     const allConfigured = config.endpoint.set && config.apiKey.set && config.deployment.set;
@@ -212,6 +317,14 @@ app.get('/api/health', (req, res) => {
         status: allConfigured ? 'ok' : 'misconfigured',
         timestamp: new Date().toISOString(),
         config: config,
+        modelInfo: {
+            deployment: deployment,
+            type: isO1 ? 'o1-series' : 'gpt-series',
+            supportedRoles: isO1 ? ['user', 'assistant'] : ['system', 'user', 'assistant'],
+            supportedParameters: isO1 ? 
+                ['max_completion_tokens'] : 
+                ['max_tokens', 'temperature', 'top_p', 'frequency_penalty', 'presence_penalty']
+        },
         environment: {
             nodeVersion: process.version,
             platform: process.platform,
@@ -249,9 +362,12 @@ app.get('/api/debug/env', (req, res) => {
     });
 });
 
-// Error troubleshooting helper
-function getErrorTroubleshooting(status, errorDetails) {
+// Error troubleshooting helper with o1 model awareness
+function getErrorTroubleshooting(status, errorDetails, isO1Model) {
     const troubleshooting = {
+        400: isO1Model ? 
+             'o1 models have different requirements: no system role, use max_completion_tokens instead of max_tokens' :
+             'Check your request parameters - invalid model parameters or message format',
         401: 'Check your AZURE_OPENAI_KEY - it may be invalid or expired',
         403: 'Check your Azure OpenAI resource permissions and subscription status',
         404: 'Check your AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_DEPLOYMENT - they may be incorrect',
