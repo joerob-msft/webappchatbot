@@ -511,18 +511,50 @@ async function processWebsitePages(pages) {
 
 // Main crawl and index function
 async function crawlAndIndexWebsite(baseUrl = null, options = {}) {
-    // Use provided URL or try to detect from request
-    const targetUrl = baseUrl || `http://localhost:${process.env.PORT || 3000}`;
+    // Detect the actual base URL for Azure App Service
+    let targetUrl = baseUrl;
     
-    console.log(`Starting crawl and index of: ${targetUrl}`);
+    if (!targetUrl) {
+        // Try to detect Azure App Service URL
+        if (process.env.WEBSITE_SITE_NAME) {
+            // Try multiple methods to get the full Azure URL
+            if (process.env.WEBSITE_HOSTNAME) {
+                // Use WEBSITE_HOSTNAME if available (most reliable)
+                targetUrl = `https://${process.env.WEBSITE_HOSTNAME}`;
+            } else if (process.env.HTTP_HOST) {
+                // Use HTTP_HOST from request headers
+                targetUrl = `https://${process.env.HTTP_HOST}`;
+            } else {
+                // Fallback: construct from WEBSITE_SITE_NAME
+                // This might not include the region suffix, but it's better than nothing
+                targetUrl = `https://${process.env.WEBSITE_SITE_NAME}.azurewebsites.net`;
+            }
+        } else {
+            // Local development
+            targetUrl = `http://localhost:${process.env.PORT || 3000}`;
+        }
+    }
+    
+    console.log(`\n=== CRAWL AND INDEX WEBSITE ===`);
+    console.log('Detected URL:', targetUrl);
+    console.log('Environment:', process.env.WEBSITE_SITE_NAME ? 'Azure App Service' : 'Local');
+    console.log('WEBSITE_HOSTNAME:', process.env.WEBSITE_HOSTNAME || 'not set');
+    console.log('HTTP_HOST:', process.env.HTTP_HOST || 'not set');
+    console.log('WEBSITE_SITE_NAME:', process.env.WEBSITE_SITE_NAME || 'not set');
     
     try {
+        // Validate URL format
+        const urlObj = new URL(targetUrl);
+        if (!['http:', 'https:'].includes(urlObj.protocol)) {
+            throw new Error('Invalid URL protocol. Must be HTTP or HTTPS.');
+        }
+        
         // Crawl the website
         const pages = await crawlWebsite(targetUrl, options);
         
         if (pages.length === 0) {
             console.log('No pages found to index');
-            return;
+            return [];
         }
         
         // Process pages into chunks and embeddings
@@ -549,6 +581,7 @@ async function crawlAndIndexWebsite(baseUrl = null, options = {}) {
         documentStore.push(websiteDoc);
         
         console.log(`✅ Website indexing complete: ${pages.length} pages, ${websiteChunks.length} chunks`);
+        return pages;
         
     } catch (error) {
         console.error('Error during website crawl and index:', error);
@@ -964,184 +997,207 @@ Please provide a helpful and accurate answer based on the context above and your
     }
 }
 
+// Add a helper function to detect the correct base URL:
+
+function detectBaseUrl() {
+    // Try multiple methods to get the correct Azure App Service URL
+    if (process.env.WEBSITE_SITE_NAME) {
+        // Method 1: Use WEBSITE_HOSTNAME (most reliable for Azure App Service)
+        if (process.env.WEBSITE_HOSTNAME) {
+            return `https://${process.env.WEBSITE_HOSTNAME}`;
+        }
+        
+        // Method 2: Try to construct from available environment variables
+        // Some Azure deployments have additional environment variables
+        const possibleHosts = [
+            process.env.HTTP_HOST,
+            process.env.SERVER_NAME,
+            process.env.WEBSITE_HOSTNAME,
+            `${process.env.WEBSITE_SITE_NAME}.azurewebsites.net`
+        ].filter(Boolean);
+        
+        if (possibleHosts.length > 0) {
+            // Use the first available host
+            const host = possibleHosts[0];
+            return host.startsWith('http') ? host : `https://${host}`;
+        }
+        
+        // Method 3: Fallback to basic construction
+        return `https://${process.env.WEBSITE_SITE_NAME}.azurewebsites.net`;
+    } else {
+        // Local development
+        return `http://localhost:${process.env.PORT || 3000}`;
+    }
+}
+
 // Chat API endpoint with RAG support
 app.post('/api/chat', async (req, res) => {
     const startTime = Date.now();
+    
+    // Set response headers early for Azure App Service
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-cache');
+    
     console.log('\n=== CHAT API REQUEST START ===');
     console.log('Timestamp:', new Date().toISOString());
+    console.log('Azure App Service:', process.env.WEBSITE_SITE_NAME ? 'YES' : 'NO');
+    console.log('Request URL:', req.url);
+    console.log('Request Method:', req.method);
+    console.log('Content-Type:', req.headers['content-type']);
     console.log('Request body:', JSON.stringify(req.body, null, 2));
     
     try {
-        const { message, useRAG = true, includeWebsiteContent = true } = req.body;
-        
-        if (!message) {
-            console.log('ERROR: Missing message in request body');
+        // Validate request body exists and is parsed
+        if (!req.body || typeof req.body !== 'object') {
+            console.error('❌ Invalid request body:', req.body);
             return res.status(400).json({ 
-                error: 'Message is required',
-                details: 'No message provided in request body'
+                error: 'Invalid request body',
+                details: 'Request body must be valid JSON',
+                received: typeof req.body,
+                timestamp: new Date().toISOString()
             });
         }
 
-        // Check if we should use local model
+        const { message, useRAG = true, includeWebsiteContent = true } = req.body;
+        
+        if (!message || typeof message !== 'string' || !message.trim()) {
+            console.error('❌ Invalid message:', message);
+            return res.status(400).json({ 
+                error: 'Message is required',
+                details: 'Message must be a non-empty string',
+                received: { message, type: typeof message },
+                timestamp: new Date().toISOString()
+            });
+        }
+
+        // Check configuration
         const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
         const localModelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
         
-        console.log('Model Configuration:');
+        console.log('🔧 Configuration Check:');
         console.log('- Use Local Model:', useLocalModel);
         console.log('- Local Model Name:', localModelName);
         console.log('- Use RAG:', useRAG);
         console.log('- Include Website Content:', includeWebsiteContent);
-        console.log('- Documents Available:', documentStore.length);
-        console.log('- Website Pages:', documentEmbeddings.filter(d => d.type === 'website').length);
+        console.log('- Azure OpenAI Endpoint:', process.env.AZURE_OPENAI_ENDPOINT ? 'SET' : 'NOT SET');
+        console.log('- Azure OpenAI Key:', process.env.AZURE_OPENAI_KEY ? 'SET' : 'NOT SET');
+        console.log('- Azure OpenAI Deployment:', process.env.AZURE_OPENAI_DEPLOYMENT || 'NOT SET');
 
         if (useLocalModel) {
-            // Initialize model if not already loaded
-            if (!localModel && !modelLoading && !modelError) {
-                console.log('Initializing local model...');
-                const initialized = await initializeLocalModel(localModelName);
-                if (!initialized) {
-                    return res.status(500).json({
-                        error: 'Failed to initialize local model',
-                        details: modelError || 'Model initialization failed',
-                        troubleshooting: 'Check server logs and ensure the model name is valid'
-                    });
-                }
-            }
+            // Local model handling (simplified for Azure)
+            console.log('🤖 Attempting local model response...');
             
-            // Auto-crawl website if no website content and includeWebsiteContent is true
-            if (includeWebsiteContent && useRAG) {
-                const websiteChunks = documentEmbeddings.filter(d => d.type === 'website');
-                if (websiteChunks.length === 0 && !websiteCrawlData.crawlInProgress) {
-                    console.log('No website content found, triggering auto-crawl...');
-                    // Don't wait for crawl to complete, just trigger it
-                    crawlAndIndexWebsite().catch(error => {
-                        console.error('Auto-crawl failed:', error);
-                    });
-                }
-            }
-            
-            // Initialize embedder for RAG if needed
-            if (useRAG && !embedder) {
-                await initializeEmbedder();
-            }
-            
-            // Wait for model to finish loading if it's currently loading
-            if (modelLoading) {
-                console.log('Model is still loading...');
-                return res.status(202).json({
-                    error: 'Model is loading',
-                    details: 'The local model is currently being initialized. Please try again in a moment.',
-                    status: 'loading',
-                    estimatedWaitTime: '30-60 seconds'
-                });
-            }
-            
-            // Check if model failed to load
-            if (modelError) {
-                return res.status(500).json({
-                    error: 'Local model failed to load',
-                    details: modelError,
-                    troubleshooting: 'Check server logs and ensure sufficient memory is available'
-                });
-            }
-            
-            // Generate response using local model with RAG
-            if (localModel) {
-                console.log('Generating response with local model and RAG...');
-                
-                try {
-                    const aiResponse = await generateLocalResponseWithRAG(
-                        message, 
-                        localModelName, 
-                        useRAG,
-                        includeWebsiteContent
-                    );
-                    const duration = Date.now() - startTime;
-                    
-                    console.log('SUCCESS: Local model response generated');
-                    console.log('Response length:', aiResponse.length);
-                    console.log('Duration:', duration + 'ms');
-                    console.log('=== CHAT API REQUEST END ===\n');
-                    
+            try {
+                // For Azure App Service, return a simple response if local models aren't working
+                if (!localModel) {
+                    console.log('⚠️ Local model not available, returning basic response');
                     return res.json({
-                        response: aiResponse,
+                        response: "I'm currently running in cloud mode. Local models are not available in this deployment. Please configure Azure OpenAI for full functionality.",
                         metadata: {
-                            duration: duration,
-                            model: localModelName,
-                            modelType: 'local-transformers',
+                            duration: Date.now() - startTime,
+                            model: 'fallback',
+                            modelType: 'fallback',
                             timestamp: new Date().toISOString(),
-                            source: 'server-side-local',
-                            ragEnabled: useRAG,
-                            websiteContentIncluded: includeWebsiteContent,
-                            documentsCount: documentStore.length,
-                            websitePagesCount: documentEmbeddings.filter(d => d.type === 'website').length,
-                            modelInfo: getLocalModelInfo(localModelName)
+                            source: 'fallback-response',
+                            ragEnabled: false,
+                            note: 'Local models not available in Azure App Service'
                         }
                     });
-                    
-                } catch (error) {
-                    console.error('Error with local model RAG:', error);
-                    return res.status(500).json({
-                        error: 'Local model inference failed',
-                        details: error.message,
-                        troubleshooting: 'The local model encountered an error during inference'
-                    });
                 }
+                
+                const aiResponse = await generateLocalResponseWithRAG(
+                    message, 
+                    localModelName, 
+                    useRAG,
+                    includeWebsiteContent
+                );
+                
+                return res.json({
+                    response: aiResponse,
+                    metadata: {
+                        duration: Date.now() - startTime,
+                        model: localModelName,
+                        modelType: 'local-transformers',
+                        timestamp: new Date().toISOString(),
+                        source: 'server-side-local',
+                        ragEnabled: useRAG,
+                        websiteContentIncluded: includeWebsiteContent
+                    }
+                });
+                
+            } catch (localError) {
+                console.error('❌ Local model error:', localError);
+                console.log('🔄 Falling back to Azure OpenAI...');
+                // Continue to Azure OpenAI fallback
             }
         }
 
-        // Use Azure OpenAI when local models are disabled
-        console.log('Using Azure OpenAI...');
-        
-        // Check Azure OpenAI configuration
-        const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
-        const apiKey = process.env.AZURE_OPENAI_KEY;
-        const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
-        
-        if (!endpoint || !apiKey || !deployment) {
-            return res.status(500).json({
-                error: 'Azure OpenAI not configured',
-                details: `Missing configuration: ${[
-                    !endpoint && 'AZURE_OPENAI_ENDPOINT',
-                    !apiKey && 'AZURE_OPENAI_KEY', 
-                    !deployment && 'AZURE_OPENAI_DEPLOYMENT'
-                ].filter(Boolean).join(', ')}`,
-                troubleshooting: 'Please check your environment variables in the .env file'
-            });
-        }
-        
-        // Auto-crawl website if no website content and includeWebsiteContent is true
-        if (includeWebsiteContent && useRAG) {
-            const websiteChunks = documentEmbeddings.filter(d => d.type === 'website');
-            if (websiteChunks.length === 0 && !websiteCrawlData.crawlInProgress) {
-                console.log('No website content found, triggering auto-crawl...');
-                crawlAndIndexWebsite().catch(error => {
-                    console.error('Auto-crawl failed:', error);
-                });
-            }
-        }
-        
-        // Initialize embedder for RAG if needed
-        if (useRAG && !embedder) {
-            await initializeEmbedder();
-        }
+        // Azure OpenAI handling
+        console.log('🌐 Using Azure OpenAI...');
         
         try {
-            console.log('Generating response with Azure OpenAI and RAG...');
+            // Validate Azure OpenAI configuration
+            const endpoint = process.env.AZURE_OPENAI_ENDPOINT;
+            const apiKey = process.env.AZURE_OPENAI_KEY;
+            const deployment = process.env.AZURE_OPENAI_DEPLOYMENT;
+            
+            console.log('🔧 Azure OpenAI Config Check:');
+            console.log('- Endpoint:', endpoint ? `${endpoint.substring(0, 30)}...` : 'NOT SET');
+            console.log('- API Key:', apiKey ? `SET (${apiKey.length} chars)` : 'NOT SET');
+            console.log('- Deployment:', deployment || 'NOT SET');
+            
+            if (!endpoint || !apiKey || !deployment) {
+                const missing = [];
+                if (!endpoint) missing.push('AZURE_OPENAI_ENDPOINT');
+                if (!apiKey) missing.push('AZURE_OPENAI_KEY');
+                if (!deployment) missing.push('AZURE_OPENAI_DEPLOYMENT');
+                
+                console.error('❌ Azure OpenAI configuration incomplete:', missing);
+                
+                return res.status(500).json({
+                    error: 'Azure OpenAI not configured',
+                    details: `Missing configuration: ${missing.join(', ')}`,
+                    troubleshooting: 'Check Azure App Service Application Settings',
+                    timestamp: new Date().toISOString(),
+                    configurationHelp: {
+                        step1: 'Go to Azure Portal > App Service > Configuration',
+                        step2: 'Add Application Settings for Azure OpenAI credentials',
+                        step3: 'Restart the App Service'
+                    }
+                });
+            }
+            
+            // Initialize Azure OpenAI client with error handling
+            if (!azureOpenAIClient) {
+                console.log('🔧 Initializing Azure OpenAI client...');
+                azureOpenAIClient = initializeAzureOpenAI();
+                
+                if (!azureOpenAIClient) {
+                    console.error('❌ Failed to initialize Azure OpenAI client');
+                    return res.status(500).json({
+                        error: 'Azure OpenAI client initialization failed',
+                        details: 'Unable to create Azure OpenAI client with provided credentials',
+                        timestamp: new Date().toISOString(),
+                        troubleshooting: 'Check Azure OpenAI service status and credentials'
+                    });
+                }
+            }
+            
+            console.log('📝 Generating Azure OpenAI response...');
             
             const aiResponse = await generateAzureOpenAIResponseWithRAG(
                 message, 
                 useRAG,
                 includeWebsiteContent
             );
+            
             const duration = Date.now() - startTime;
             
-            console.log('SUCCESS: Azure OpenAI response generated');
+            console.log('✅ SUCCESS: Response generated');
             console.log('Response length:', aiResponse.length);
             console.log('Duration:', duration + 'ms');
-            console.log('=== CHAT API REQUEST END ===\n');
             
-            return res.json({
+            const successResponse = {
                 response: aiResponse,
                 metadata: {
                     duration: duration,
@@ -1151,38 +1207,55 @@ app.post('/api/chat', async (req, res) => {
                     source: 'azure-cloud',
                     ragEnabled: useRAG,
                     websiteContentIncluded: includeWebsiteContent,
-                    documentsCount: documentStore.length,
-                    websitePagesCount: documentEmbeddings.filter(d => d.type === 'website').length,
-                    endpoint: endpoint?.split('.')[0] + '...' // Partially masked endpoint
+                    endpoint: endpoint.split('.')[0] + '...' // Partially masked
                 }
-            });
+            };
             
-        } catch (error) {
-            console.error('Error with Azure OpenAI:', error);
+            console.log('📤 Sending response:', JSON.stringify(successResponse, null, 2));
+            return res.json(successResponse);
+            
+        } catch (azureError) {
+            console.error('❌ Azure OpenAI error:', azureError);
+            console.error('Error type:', azureError.constructor.name);
+            console.error('Error message:', azureError.message);
+            console.error('Error status:', azureError.status);
+            
             return res.status(500).json({
                 error: 'Azure OpenAI request failed',
-                details: error.message,
-                troubleshooting: 'Check your Azure OpenAI configuration and quota'
+                details: azureError.message,
+                errorType: azureError.constructor.name,
+                statusCode: azureError.status || 'unknown',
+                timestamp: new Date().toISOString(),
+                troubleshooting: 'Check Azure OpenAI service status and quota'
             });
         }
+        
     } catch (error) {
         const duration = Date.now() - startTime;
-        console.log('\n!!! CHAT API EXCEPTION !!!');
-        console.log('Error type:', error.constructor.name);
-        console.log('Error message:', error.message);
-        console.log('Error stack:', error.stack);
-        console.log('Duration before error:', duration + 'ms');
-        console.log('=== CHAT API REQUEST END (WITH ERROR) ===\n');
         
-        res.status(500).json({ 
+        console.error('\n🚨 CRITICAL CHAT API ERROR 🚨');
+        console.error('Error type:', error.constructor.name);
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+        console.error('Request URL:', req.url);
+        console.error('Request body:', req.body);
+        console.error('Duration before error:', duration + 'ms');
+        console.error('=== END CRITICAL ERROR ===\n');
+        
+        // Ensure we always return JSON
+        const errorResponse = {
             error: 'Internal server error',
-            details: {
-                type: error.constructor.name,
-                message: error.message,
-                timestamp: new Date().toISOString()
-            },
-            troubleshooting: 'Check server logs for detailed error information'
-        });
+            details: error.message,
+            errorType: error.constructor.name,
+            timestamp: new Date().toISOString(),
+            duration: duration,
+            troubleshooting: 'Check Azure App Service logs for detailed error information'
+        };
+        
+        console.log('📤 Sending error response:', JSON.stringify(errorResponse, null, 2));
+        return res.status(500).json(errorResponse);
+    } finally {
+        console.log('=== CHAT API REQUEST END ===\n');
     }
 });
 
@@ -1254,36 +1327,12 @@ app.post('/api/website/crawl', async (req, res) => {
 // Auto-crawl current website (existing POST endpoint)
 app.post('/api/website/auto-crawl', async (req, res) => {
     try {
-        const baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+        const baseUrl = detectBaseUrl();
         
-        // Start auto-crawl
-        crawlAndIndexWebsite(baseUrl, {
-            maxPages: 20,
-            respectRobots: false, // Skip robots.txt for own site
-            includeExternalLinks: false,
-            crawlDelay: 500 // Faster for local crawling
-        }).catch(error => {
-            console.error('Auto-crawl failed:', error);
-        });
-        
-        res.json({
-            success: true,
-            message: 'Auto-crawl started for current website',
-            baseUrl: baseUrl
-        });
-        
-    } catch (error) {
-        res.status(500).json({
-            error: 'Failed to start auto-crawl',
-            details: error.message
-        });
-    }
-});
-
-// Add GET endpoint for browser access
-app.get('/api/website/auto-crawl', async (req, res) => {
-    try {
-        const baseUrl = `http://localhost:${process.env.PORT || 3000}`;
+        console.log(`Auto-crawl starting for: ${baseUrl}`);
+        console.log('Detection method used:', process.env.WEBSITE_HOSTNAME ? 'WEBSITE_HOSTNAME' : 
+                    process.env.HTTP_HOST ? 'HTTP_HOST' : 
+                    process.env.WEBSITE_SITE_NAME ? 'WEBSITE_SITE_NAME fallback' : 'localhost');
         
         // Check if crawl is already in progress
         if (websiteCrawlData.crawlInProgress) {
@@ -1298,10 +1347,10 @@ app.get('/api/website/auto-crawl', async (req, res) => {
         
         // Start auto-crawl
         crawlAndIndexWebsite(baseUrl, {
-            maxPages: 20,
+            maxPages: process.env.WEBSITE_MAX_PAGES ? parseInt(process.env.WEBSITE_MAX_PAGES) : 20,
             respectRobots: false, // Skip robots.txt for own site
             includeExternalLinks: false,
-            crawlDelay: 500 // Faster for local crawling
+            crawlDelay: process.env.WEBSITE_CRAWL_DELAY ? parseInt(process.env.WEBSITE_CRAWL_DELAY) : 500
         }).catch(error => {
             console.error('Auto-crawl failed:', error);
         });
@@ -1310,6 +1359,51 @@ app.get('/api/website/auto-crawl', async (req, res) => {
             success: true,
             message: 'Auto-crawl started for current website',
             baseUrl: baseUrl,
+            environment: process.env.WEBSITE_SITE_NAME ? 'Azure App Service' : 'Local',
+            detectionMethod: process.env.WEBSITE_HOSTNAME ? 'WEBSITE_HOSTNAME' : 
+                           process.env.HTTP_HOST ? 'HTTP_HOST' : 
+                           process.env.WEBSITE_SITE_NAME ? 'WEBSITE_SITE_NAME' : 'localhost'
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            error: 'Failed to start auto-crawl',
+            details: error.message
+        });
+    }
+});
+
+// Replace the GET auto-crawl endpoint:
+app.get('/api/website/auto-crawl', async (req, res) => {
+    try {
+        const baseUrl = detectBaseUrl();
+        
+        // Check if crawl is already in progress
+        if (websiteCrawlData.crawlInProgress) {
+            return res.json({
+                success: false,
+                message: 'Auto-crawl already in progress',
+                status: 'in-progress',
+                baseUrl: baseUrl,
+                crawledPages: websiteCrawlData.crawledPages
+            });
+        }
+        
+        // Start auto-crawl
+        crawlAndIndexWebsite(baseUrl, {
+            maxPages: process.env.WEBSITE_MAX_PAGES ? parseInt(process.env.WEBSITE_MAX_PAGES) : 20,
+            respectRobots: false, // Skip robots.txt for own site
+            includeExternalLinks: false,
+            crawlDelay: process.env.WEBSITE_CRAWL_DELAY ? parseInt(process.env.WEBSITE_CRAWL_DELAY) : 500
+        }).catch(error => {
+            console.error('Auto-crawl failed:', error);
+        });
+        
+        res.json({
+            success: true,
+            message: 'Auto-crawl started for current website',
+            baseUrl: baseUrl,
+            environment: process.env.WEBSITE_SITE_NAME ? 'Azure App Service' : 'Local',
             tip: 'Check status at /api/website/status'
         });
         
@@ -1580,6 +1674,33 @@ app.post('/api/azure-openai/test', async (req, res) => {
     }
 });
 
+// Add a debug endpoint to check URL detection:
+
+app.get('/api/debug/url-detection', (req, res) => {
+    const detectedUrl = detectBaseUrl();
+    
+    res.json({
+        detectedUrl: detectedUrl,
+        environment: process.env.WEBSITE_SITE_NAME ? 'Azure App Service' : 'Local Development',
+        availableEnvironmentVars: {
+            WEBSITE_SITE_NAME: process.env.WEBSITE_SITE_NAME || 'not set',
+            WEBSITE_HOSTNAME: process.env.WEBSITE_HOSTNAME || 'not set',
+            HTTP_HOST: process.env.HTTP_HOST || 'not set',
+            SERVER_NAME: process.env.SERVER_NAME || 'not set',
+            PORT: process.env.PORT || 'not set'
+        },
+        requestHeaders: req.headers.host ? {
+            host: req.headers.host,
+            'x-forwarded-host': req.headers['x-forwarded-host'],
+            'x-original-host': req.headers['x-original-host']
+        } : {},
+        detectionMethod: process.env.WEBSITE_HOSTNAME ? 'WEBSITE_HOSTNAME (most reliable)' : 
+                        process.env.HTTP_HOST ? 'HTTP_HOST' : 
+                        process.env.WEBSITE_SITE_NAME ? 'WEBSITE_SITE_NAME fallback' : 'localhost',
+        timestamp: new Date().toISOString()
+    });
+});
+
 // Create uploads directory if it doesn't exist
 const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdir(uploadsDir, { recursive: true }).catch(console.error);
@@ -1600,22 +1721,75 @@ app.listen(port, () => {
 
 // Initialize Azure OpenAI client on startup if configured and not using local model
 async function initializeServicesOnStartup() {
+    console.log('\n🚀 INITIALIZING SERVICES FOR AZURE APP SERVICE 🚀');
+    console.log('Environment:', process.env.NODE_ENV || 'not set');
+    console.log('Azure App Service:', process.env.WEBSITE_SITE_NAME ? 'YES (' + process.env.WEBSITE_SITE_NAME + ')' : 'NO');
+    console.log('Use Local Model:', process.env.USE_LOCAL_MODEL);
+    
+    // Detect and log the base URL
+    const detectedUrl = detectBaseUrl();
+    console.log('Detected Base URL:', detectedUrl);
+    
     const useLocalModel = process.env.USE_LOCAL_MODEL === 'true';
     
     if (!useLocalModel) {
-        console.log('Initializing Azure OpenAI client on startup...');
+        console.log('🌐 Initializing Azure OpenAI for cloud deployment...');
         try {
-            azureOpenAIClient = initializeAzureOpenAI();
-            if (azureOpenAIClient) {
-                console.log('✅ Azure OpenAI client ready');
-            } else {
-                console.log('⚠️ Azure OpenAI client initialization failed');
+            // Check environment variables first
+            const requiredVars = ['AZURE_OPENAI_ENDPOINT', 'AZURE_OPENAI_KEY', 'AZURE_OPENAI_DEPLOYMENT'];
+            const missing = requiredVars.filter(varName => !process.env[varName]);
+            
+            if (missing.length > 0) {
+                console.error('❌ Missing Azure OpenAI environment variables:', missing);
+                console.error('Please configure these in Azure App Service Application Settings');
+                return;
             }
+            
+            azureOpenAIClient = initializeAzureOpenAI();
+            if (!azureOpenAIClient) {
+                console.error('❌ Azure OpenAI client initialization failed');
+                return;
+            }
+            
+            console.log('✅ Azure OpenAI client initialized successfully');
+            
         } catch (error) {
-            console.error('❌ Azure OpenAI startup error:', error);
+            console.error('❌ Error initializing Azure OpenAI:', error);
         }
+    } else {
+        console.log('🤖 Local model initialization requested');
+        const modelName = process.env.LOCAL_MODEL_NAME || 'distilgpt2';
+        await initializeLocalModel(modelName);
     }
+    
+    // Initialize embedder for RAG functionality
+    console.log('🔧 Initializing embedder for RAG...');
+    await initializeEmbedder();
+    
+    // Auto-crawl website if enabled
+    if (process.env.WEBSITE_AUTO_CRAWL === 'true') {
+        console.log('🕷️ Starting auto-crawl of website...');
+        setTimeout(async () => {
+            try {
+                const baseUrl = detectBaseUrl();
+                console.log('Auto-crawl target URL:', baseUrl);
+                
+                await crawlAndIndexWebsite(baseUrl, {
+                    maxPages: process.env.WEBSITE_MAX_PAGES ? parseInt(process.env.WEBSITE_MAX_PAGES) : 20,
+                    respectRobots: false,
+                    includeExternalLinks: false,
+                    crawlDelay: process.env.WEBSITE_CRAWL_DELAY ? parseInt(process.env.WEBSITE_CRAWL_DELAY) : 1000
+                });
+                
+                console.log('✅ Auto-crawl completed successfully');
+            } catch (error) {
+                console.error('❌ Auto-crawl failed:', error);
+            }
+        }, 5000); // Wait 5 seconds after startup
+    }
+    
+    console.log('🚀 STARTUP COMPLETE 🚀\n');
 }
 
-// Add this before your server.listen():
-initializeServicesOnStartup();
+// Run initialization on startup
+initializeServicesOnStartup().catch(console.error);
